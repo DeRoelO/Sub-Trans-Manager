@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Play, FileEdit, RefreshCcw } from 'lucide-react'
 
-// Depending on deployment, API URL might be relative
-const API_BASE = 'http://localhost:8000/api'
+// Use relative path since backend serves frontend
+const API_BASE = '/api'
 
 export default function Dashboard() {
   const [media, setMedia] = useState([])

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Play, Square, Save } from 'lucide-react'
 
-const API_BASE = 'http://localhost:8000/api'
+const API_BASE = '/api'
 
 export default function SettingsPage() {
   const [config, setConfig] = useState({})

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Save, ArrowLeft } from 'lucide-react'
 
-const API_BASE = 'http://localhost:8000/api'
+const API_BASE = '/api'
 
 export default function Editor() {
   const [searchParams] = useSearchParams()

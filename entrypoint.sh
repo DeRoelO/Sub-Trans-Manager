@@ -23,4 +23,4 @@ chown -R abc:abc "$CONFIG_PATH"
 # Run FastAPI using gosu to drop privileges
 # We use uvicorn to serve the API
 cd /app
-exec gosu abc uvicorn backend.main:app --host 0.0.0.0 --port 8000
+exec gosu abc uvicorn backend.main:app --host 0.0.0.0 --port 8060
