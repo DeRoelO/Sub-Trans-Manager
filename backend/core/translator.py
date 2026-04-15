@@ -28,13 +28,6 @@ def chunk_text(parsed_data: List[Dict[str, str]], chunk_size: int = 1500) -> Lis
 
 def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
     input_json = json.dumps({"items": [{"id": i, "text": t} for i, t in enumerate(texts)]}, ensure_ascii=False)
-    prompt = (
-        f"Translate the 'text' field in the following JSON objects to {target_language}. "
-        "Keep the 'id' intact. Use informal phrasing (e.g., 'je/jou' for Dutch). "
-        "IMPORTANT: NEVER output the source language. You MUST translate the text, even if it seems hard. "
-        "Output ONLY valid JSON matching the input structure.\n"
-        f"[INPUT]\n{input_json}"
-    )
     
     safety = { 
         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE, 
@@ -44,11 +37,21 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
     }
     
     for attempt in range(2):
+        temp = 0.1 if attempt == 0 else 0.3
+        force_msg = "" if attempt == 0 else "IMPORTANT: You previously failed or returned English. You MUST translate to the target language now! "
+        
+        prompt = (
+            f"{force_msg}Translate the 'text' field in the following JSON objects to {target_language}. "
+            "Keep the 'id' intact. Use informal phrasing (e.g., 'je/jou' for Dutch). "
+            "Output ONLY valid JSON matching the input structure.\n"
+            f"[INPUT]\n{input_json}"
+        )
+        
         try:
             res = model.generate_content(
                 prompt, 
                 safety_settings=safety, 
-                generation_config={"temperature": 0.1}
+                generation_config={"temperature": temp}
             )
             start_idx = res.text.find('{')
             end_idx = res.text.rfind('}')
@@ -57,7 +60,6 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
             
             clean_json = res.text[start_idx : end_idx + 1]
             items_dict = json.loads(clean_json)
-            # Find the array of objects, handling different potential keys from the AI
             items = []
             for k, v in items_dict.items():
                 if isinstance(v, list):
@@ -67,12 +69,20 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
             if not items:
                 raise ValueError("Could not extract items array from JSON")
                 
-            return [next((i.get("text", "") for i in items if i.get("id") == idx), texts[idx]) for idx in range(len(texts))]
+            results = [next((i.get("text", "") for i in items if i.get("id") == idx), texts[idx]) for idx in range(len(texts))]
+            
+            # Substantiality check: if too many items are identical to source, it likely failed to translate
+            identical_count = sum(1 for i, t in enumerate(results) if t.strip() == texts[i].strip())
+            if identical_count > (len(texts) * 0.7) and len(texts) > 2:
+                if attempt == 0:
+                    raise ValueError("Model returned source text instead of translation (80%+ identical)")
+
+            return results
         except Exception as e:
             if attempt < 1: 
                 time.sleep(2)
             else: 
-                print(f"Translation chunk failed after 2 attempts. Returning original text. Error: {e}")
+                print(f"Translation chunk failed after {attempt+1} attempts. Falling back to original text. Error: {e}")
                 return texts
 
 def translate_single_file(input_file: str, log_callback=None):
@@ -129,18 +139,23 @@ def translate_single_file(input_file: str, log_callback=None):
     final_srt = "\n".join([f"{o['index']}\n{o['time']}\n{flat_translations[i] if i < len(flat_translations) else o['text']}\n" for i, o in enumerate(parsed)])
     
     
-    # Save a backup of the original input file
-    try:
-        import shutil
-        shutil.copy2(input_file, input_file + ".bak")
-        if log_callback: log_callback(f"Backup created: {input_file}.bak")
-    except Exception as e:
-        if log_callback: log_callback(f"Warning: Failed to create backup: {e}")
-
     output_path = re.sub(r'\.(en|eng|hi|en\.hi|eng\.hi)\.srt$', '.nl.srt', input_file, flags=re.IGNORECASE)
     if output_path == input_file: 
         output_path = input_file.replace(".srt", ".nl.srt")
         
+    # Save a backup of the original input file (the source .en.srt)
+    try:
+        import shutil
+        shutil.copy2(input_file, input_file + ".bak")
+        if log_callback: log_callback(f"Source backup created: {input_file}.bak")
+        
+        # ALSO backup existing .nl.srt if it exists before overwriting
+        if os.path.exists(output_path):
+            shutil.copy2(output_path, output_path + ".bak")
+            if log_callback: log_callback(f"Existing translation backup created: {output_path}.bak")
+    except Exception as e:
+        if log_callback: log_callback(f"Warning: Failed to create backups: {e}")
+
     with open(output_path, 'w', encoding='utf-8') as f: 
         f.write(final_srt)
         

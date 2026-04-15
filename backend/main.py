@@ -251,6 +251,59 @@ async def restore_backup(request: Request):
         return {"status": "restored"}
     return JSONResponse(status_code=404, content={"error": "Backup file not found"})
 
+@app.get("/api/audit/list")
+async def audit_list():
+    settings = get_settings()
+    films_path = settings.get("films_path", "/Films")
+    series_path = settings.get("series_path", "/Series")
+    
+    results = []
+    for path in [films_path, series_path]:
+        if os.path.exists(path):
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    if file.lower().endswith(".nl.srt"):
+                        full_path = os.path.join(root, file)
+                        results.append({
+                            "name": file,
+                            "path": full_path,
+                            "rel_path": os.path.relpath(full_path, start=path)
+                        })
+    return {"files": results}
+
+@app.get("/api/audit/sample")
+async def audit_sample(file_path: str):
+    if not os.path.exists(file_path):
+        return JSONResponse(status_code=404, content={"error": "File not found"})
+    
+    try:
+        with open(file_path, "rb") as f:
+            bytes_data = f.read()
+        encoding = detect_encoding(bytes_data) or 'utf-8'
+        content = bytes_data.decode(encoding, errors='ignore')
+        parsed = parse_srt(content)
+        
+        import random
+        # Get 10 random samples or all if less than 10
+        sample_size = min(len(parsed), 10)
+        samples = random.sample(parsed, sample_size)
+        return {"samples": sorted(samples, key=lambda x: int(x['index']))}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/audit/delete")
+async def audit_delete(request: Request):
+    data = await request.json()
+    file_path = data.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        return JSONResponse(status_code=404, content={"error": "File not found"})
+    
+    try:
+        os.remove(file_path)
+        return {"status": "deleted"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 # --- Serve Frontend SPA ---
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 if os.path.exists(frontend_path):
