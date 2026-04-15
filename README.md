@@ -1,50 +1,50 @@
 # Sub-Trans Manager 🎬
 
-Sub-Trans Manager is een krachtige, web-gebaseerde tool voor het beheren en automatisch vertalen van ondertitels. Het maakt gebruik van Google Gemini AI om hoogwaardige, context-bewuste vertalingen te genereren voor je film- en seriecollectie.
+Sub-Trans Manager is a powerful, web-based tool for managing and automatically translating subtitles. It leverages Google Gemini AI to generate high-quality, context-aware translations for your movie and TV series collection.
 
-## 🚀 Hoofdfuncties
+## 🚀 Key Features
 
-- **AI-Aangedreven Vertaling**: Maakt gebruik van Gemini (1.5 of 2.0) om SRT-bestanden te vertalen met oog voor context en natuurlijk taalgebruik.
-- **Smart Chunking**: Verwerkt grote ondertitelbestanden in geoptimaliseerde blokken (10.000+ karakters) voor maximale contextuele accuratesse.
-- **Side-by-Side Editor**: Een robuuste SRT-editor met een rij-gebaseerde layout, zodat de originele Engelse tekst en de vertaling altijd perfect uitgelijnd blijven.
+- **AI-Powered Translation**: Uses Gemini (1.5 or 2.0) to translate SRT files with a focus on context and natural dialogue.
+- **Smart Chunking**: Processes large subtitle files in optimized blocks (10,000+ characters) for maximum contextual accuracy.
+- **Side-by-Side Editor**: A robust SRT editor with a row-based layout, ensuring the original English text and the translation always remain perfectly aligned.
 - **Subtitle Audit Tool**: 
-  - Scan je hele bibliotheek op vertaalde bestanden.
-  - Automatische taal-detectie (detecteert 'stiekeme' Engelse teksten in Nederlandse bestanden).
-  - Bulk-verwijdering van verdachte bestanden.
-- **Automatisering**: Ingebouwde scheduler voor dagelijkse scans en vertaal-batches.
-- **Jellyfin Integratie**: Automatische bibliotheek-verversing via webhooks na een geslaagde vertaling.
-- **Data Veiligheid**: Automatische backups van zowel bronbestanden (`.en.srt.bak`) als bestaande vertalingen (`.nl.srt.bak`).
+  - Scan your entire library for translated files.
+  - Automatic language detection (detects "fake" translated files that are actually still English).
+  - Bulk deletion of suspicious files.
+- **Automation**: Built-in scheduler for daily scans and translation batches.
+- **Jellyfin Integration**: Automatic library refresh via webhooks after successful translation.
+- **Data Safety**: Automatic backups of both source files (`.en.srt.bak`) and existing translations (`.nl.srt.bak`).
 
-## 🛠 Technologie Stack
+## 🛠 Technology Stack
 
 - **Backend**: Python (FastAPI, APScheduler, Google Generative AI SDK)
-- **Frontend**: React (Vite, Lucide-React, Tailwind-achtige glassmorphism styling)
+- **Frontend**: React (Vite, Lucide-React, Glassmorphism UI)
 - **Deployment**: Docker & Docker Compose support
 
-## 📦 Installatie & Gebruik
+## 📦 Installation & Usage
 
-### Docker (Aanbevolen)
+### Docker (Recommended)
 
-Gebruik de meegeleverde `Dockerfile` of Docker Compose om de container te draaien. Zorg dat je de volgende volumes koppelt:
-- `/Films`: Pad naar je filmcollectie.
-- `/Series`: Pad naar je seriecollectie.
-- `/app/backend/config`: Voor persistentie van de `settings.json`.
+Use the provided `Dockerfile` or Docker Compose to run the container. Ensure you map the following volumes:
+- `/Films`: Path to your movie collection.
+- `/Series`: Path to your series collection.
+- `/app/backend/config`: For persistence of the `settings.json`.
 
-### Configuratie
+### Configuration
 
-1. Start de applicatie en navigeer naar **Settings**.
-2. Voer je **Gemini API Key** in en klik op "Verbinding Maken".
-3. Selecteer het gewenste AI-model (bijv. `gemini-1.5-flash-latest` of `gemini-2.0-flash`).
-4. Stel je **Doeltaal** (standaard: Dutch) en batch-limieten in.
-5. Sla de instellingen op.
+1. Start the application and navigate to **Settings**.
+2. Enter your **Gemini API Key** and click "Connect".
+3. Select the desired AI model (e.g., `gemini-1.5-flash-latest` or `gemini-2.0-flash`).
+4. Set your **Target Language** (default: Dutch) and batch limits.
+5. Save the settings.
 
-## 🔍 Audit & Controle
+## 🔍 Audit & Verification
 
-Met de **Subtitle Audit Tool** kun je de kwaliteit van je vertalingen bewaken. De tool gebruikt een heuristische analyse om te waarschuwen als een vertaling nog te veel Engelse "stopwoorden" bevat. Je kunt deze gemarkeerde bestanden met één druk op de knop verwijderen, waarna ze in de volgende batch-ronde opnieuw worden opgepakt.
+The **Subtitle Audit Tool** allows you to monitor the quality of your translations. The tool uses heuristic analysis to warn you if a translation contains too many English "function words". You can delete these flagged files with a single click, allowing them to be re-translated in the next batch run.
 
-## 📄 Licentie
+## 📄 License
 
-Dit project is ontwikkeld voor eigen gebruik en automatisering van ondertitel-workflows.
+This project is developed for personal use and subtitle workflow automation.
 
 ---
-*Gemaakt met ❤️ voor filmliefhebbers die houden van goede ondertiteling.*
+*Created with ❤️ for movie enthusiasts who value high-quality subtitles.*
