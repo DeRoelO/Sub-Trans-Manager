@@ -6,7 +6,7 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULT_SETTINGS = {
     "gemini_api_key": "",
-    "ai_model": "gemini-1.5-flash",
+    "ai_model": "gemini-2.0-flash",
     "target_language": "Dutch",
     "films_path": "/Films",
     "series_path": "/Series",
