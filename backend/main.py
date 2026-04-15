@@ -72,12 +72,18 @@ def list_media():
                         if not existing:
                             # Parse out directory path context for neat display
                             rel_path = os.path.relpath(root, start=path)
-                            display_dir = rel_path if rel_path != "." else os.path.basename(root)
+                            
+                            if kind == "series" and rel_path != ".":
+                                # For series, use the top-level folder name as the group
+                                display_dir = rel_path.split(os.sep)[0]
+                            else:
+                                display_dir = rel_path if rel_path != "." else os.path.basename(root)
 
                             existing = {
                                 "base_path": full_base_path,
                                 "name": base_name_match, 
                                 "group": display_dir, 
+                                "subpath": rel_path if rel_path != display_dir else "",
                                 "kind": kind,
                                 "has_en": False,
                                 "has_nl": False,

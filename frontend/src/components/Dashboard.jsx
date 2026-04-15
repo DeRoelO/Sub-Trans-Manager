@@ -70,6 +70,7 @@ export default function Dashboard() {
     <div key={idx} className="glass-panel media-card flex-col gap-4">
       <div>
         <h4 style={{ fontSize: '1rem', marginBottom: '0.5rem', wordBreak: 'break-all' }}>{item.name}</h4>
+        {item.subpath && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Het pad: {item.subpath}</div>}
       </div>
       
       <div className="flex gap-2">
