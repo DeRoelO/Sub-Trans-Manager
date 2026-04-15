@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Save, ArrowLeft } from 'lucide-react'
 
@@ -13,6 +13,10 @@ export default function Editor() {
   const [nlSrt, setNlSrt] = useState([])
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
+  
+  const enScrollRef = useRef(null)
+  const nlScrollRef = useRef(null)
+  const isSyncing = useRef(false)
 
   useEffect(() => {
     if (!filePathEn) return
@@ -59,6 +63,18 @@ export default function Editor() {
     }
   }
 
+  const syncScroll = (source, target) => {
+    if (isSyncing.current) return
+    isSyncing.current = true
+    if (target.current) {
+      target.current.scrollTop = source.current.scrollTop
+    }
+    // Small timeout to release the lock after the passive scroll finishes
+    setTimeout(() => {
+      isSyncing.current = false
+    }, 50)
+  }
+
   if (!filePathEn) return <p>Geen bestand geselecteerd.</p>
 
   return (
@@ -79,7 +95,11 @@ export default function Editor() {
         <div className="editor-grid">
           <div className="glass-panel editor-pane">
             <div className="editor-header">English ({filePathEn.split(/[\\/]/).pop()})</div>
-            <div className="editor-content">
+            <div 
+              className="editor-content" 
+              ref={enScrollRef} 
+              onScroll={() => syncScroll(enScrollRef, nlScrollRef)}
+            >
               {enSrt.map((item, idx) => (
                 <div key={idx} className="form-group" style={{ marginBottom: '0.5rem' }}>
                   <label style={{ fontSize: '0.75rem', marginBottom: '0.2rem' }}>{item.time}</label>
@@ -93,7 +113,11 @@ export default function Editor() {
           
           <div className="glass-panel editor-pane">
             <div className="editor-header">Dutch ({filePathNl ? filePathNl.split(/[\\/]/).pop() : '...'})</div>
-            <div className="editor-content">
+            <div 
+              className="editor-content" 
+              ref={nlScrollRef} 
+              onScroll={() => syncScroll(nlScrollRef, enScrollRef)}
+            >
               {nlSrt.map((item, idx) => (
                 <div key={idx} className="form-group" style={{ marginBottom: '0.5rem' }}>
                   <label style={{ fontSize: '0.75rem', marginBottom: '0.2rem' }}>{item.time}</label>
