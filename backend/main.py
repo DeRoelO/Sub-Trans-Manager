@@ -60,8 +60,9 @@ def list_media():
                 for file in files:
                     file_lower = file.lower()
                     if file_lower.endswith(".srt"):
-                        # Define the core "show_name_episode" base
-                        base_name_match = re.sub(r'\.(en|eng|hi|nl|dut|en\.hi|eng\.hi)\.srt$', '', file, flags=re.IGNORECASE)
+                        # Improved regex to handle multiple tags: e.g. .en.srt, .en.hi.srt, .nl.hi.srt
+                        # It matches .[lang].srt AND .[lang].[hi/sdh/forced].srt
+                        base_name_match = re.sub(r'\.(en|eng|hi|nl|dut|sdh|forced|en\.hi|eng\.hi|nl\.hi|dut\.hi)(\.(hi|sdh|forced))?\.srt$', '', file, flags=re.IGNORECASE)
                         if base_name_match == file:
                             base_name_match = file.replace(".srt", "")
                             
@@ -94,8 +95,11 @@ def list_media():
                             }
                             media.append(existing)
                         
-                        is_eng = any(x in file_lower for x in [".en.", ".eng.", ".hi.", ".en.hi.", ".eng.hi."])
                         is_nl = any(x in file_lower for x in [".nl.", ".dut."])
+                        # English is only detected if specifically tagged, 
+                        # OR if it has a generic .hi. / .sdh. tags AND NO Dutch tag is present.
+                        is_eng = any(x in file_lower for x in [".en.", ".eng."]) or \
+                                 (not is_nl and any(x in file_lower for x in [".hi.srt", ".sdh.srt"]))
                         
                         if is_eng:
                             existing["has_en"] = True
