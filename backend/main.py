@@ -256,13 +256,27 @@ async def audit_list():
     settings = get_settings()
     films_path = settings.get("films_path", "/Films")
     series_path = settings.get("series_path", "/Series")
+    target_lang = settings.get("target_language", "Dutch").lower()
+    
+    # Define tags to look for based on target language
+    lang_map = {
+        "dutch": [".nl.srt", ".dut.srt"],
+        "english": [".en.srt", ".eng.srt"],
+        "french": [".fr.srt", ".fre.srt", ".fra.srt"],
+        "german": [".de.srt", ".ger.srt", ".deu.srt"],
+        "spanish": [".es.srt", ".spa.srt"]
+    }
+    
+    # Fallback to .nl.srt if not in map, or use the map
+    valid_extensions = lang_map.get(target_lang, [".nl.srt"])
     
     results = []
     for path in [films_path, series_path]:
         if os.path.exists(path):
             for root, dirs, files in os.walk(path):
                 for file in files:
-                    if file.lower().endswith(".nl.srt"):
+                    file_lower = file.lower()
+                    if any(file_lower.endswith(ext) for ext in valid_extensions):
                         full_path = os.path.join(root, file)
                         results.append({
                             "name": file,
