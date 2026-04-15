@@ -171,7 +171,6 @@ export default function SettingsPage() {
                 value={config.ai_model || ''} 
                 onChange={(e) => handleConfigChange('ai_model', e.target.value)}
                 disabled={availableModels.length === 0}
-                style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)' }}
               >
                 <option value="">-- Kies eerst Verbinding maken --</option>
                 {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
