@@ -26,9 +26,15 @@ def chunk_text(parsed_data: List[Dict[str, str]], chunk_size: int = 1500) -> Lis
     if current_chunk: chunks.append(current_chunk)
     return chunks
 
-def translate_chunk(model, texts: List[str]) -> List[str]:
+def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
     input_json = json.dumps({"items": [{"id": i, "text": t} for i, t in enumerate(texts)]}, ensure_ascii=False)
-    prompt = f"Translate the 'text' field in the JSON objects to Dutch. Keep the 'id' intact. Use informal 'je/jou'. Output ONLY valid JSON.\n[INPUT]\n{input_json}"
+    prompt = (
+        f"Translate the 'text' field in the following JSON objects to {target_language}. "
+        "Keep the 'id' intact. Use informal phrasing (e.g., 'je/jou' for Dutch). "
+        "IMPORTANT: NEVER output the source language. You MUST translate the text, even if it seems hard. "
+        "Output ONLY valid JSON matching the input structure.\n"
+        f"[INPUT]\n{input_json}"
+    )
     safety = { 
         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE, 
         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE, 
@@ -68,6 +74,7 @@ def translate_single_file(input_file: str, log_callback=None):
     if log_callback: log_callback(f"Starting translation for {input_file}")
     
     API_KEY = os.environ.get("GEMINI_API_KEY")
+    settings = None
     if not API_KEY:
         from core.config import get_settings
         settings = get_settings()
@@ -79,8 +86,17 @@ def translate_single_file(input_file: str, log_callback=None):
         print(msg)
         return False
         
+    if not settings:
+        from core.config import get_settings
+        settings = get_settings()
+
+    ai_model_name = settings.get("ai_model", "gemini-1.5-flash")
+    target_language = settings.get("target_language", "Dutch")
+
+    if log_callback: log_callback(f"[HANDMATIG] Using model: {ai_model_name}, Target: {target_language}")
+        
     genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel(ai_model_name)
     
     with open(input_file, 'rb') as f: bytes_data = f.read()
     encoding = detect_encoding(bytes_data) or 'utf-8'
@@ -95,7 +111,7 @@ def translate_single_file(input_file: str, log_callback=None):
     total_chunks = len(chunks)
     
     for idx, chunk in enumerate(chunks):
-        all_results.append(translate_chunk(model, [item['text'] for item in chunk]))
+        all_results.append(translate_chunk(model, [item['text'] for item in chunk], target_language))
         if log_callback: log_callback(f"Translated chunk {idx + 1}/{total_chunks}")
         time.sleep(1)
         
@@ -107,6 +123,15 @@ def translate_single_file(input_file: str, log_callback=None):
         
     final_srt = "\n".join([f"{o['index']}\n{o['time']}\n{flat_translations[i] if i < len(flat_translations) else o['text']}\n" for i, o in enumerate(parsed)])
     
+    
+    # Save a backup of the original input file
+    try:
+        import shutil
+        shutil.copy2(input_file, input_file + ".bak")
+        if log_callback: log_callback(f"Backup created: {input_file}.bak")
+    except Exception as e:
+        if log_callback: log_callback(f"Warning: Failed to create backup: {e}")
+
     output_path = re.sub(r'\.(en|eng|hi|en\.hi|eng\.hi)\.srt$', '.nl.srt', input_file, flags=re.IGNORECASE)
     if output_path == input_file: 
         output_path = input_file.replace(".srt", ".nl.srt")
@@ -115,6 +140,17 @@ def translate_single_file(input_file: str, log_callback=None):
         f.write(final_srt)
         
     if log_callback: log_callback(f"Successfully saved translated file to {output_path}")
+    
+    # Trigger Webhook
+    webhook = settings.get("jellyfin_webhook") if settings else None
+    if webhook:
+        try:
+            import httpx
+            httpx.post(webhook)
+            if log_callback: log_callback("Jellyfin webhook triggered successfully.")
+        except Exception as e:
+            if log_callback: log_callback(f"Failed to trigger webhook: {e}")
+
     return True
 
 if __name__ == "__main__":

@@ -6,11 +6,13 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULT_SETTINGS = {
     "gemini_api_key": "",
+    "ai_model": "gemini-1.5-flash",
+    "target_language": "Dutch",
     "films_path": "/Films",
     "series_path": "/Series",
     "batch_limit": 60,
     "batch_delay": 60,
-    "cron_expression": "0 2 * * *", # Default 2 AM
+    "cron_time": "02:00", # Specific time instead of full cron expr
     "jellyfin_webhook": ""
 }
 

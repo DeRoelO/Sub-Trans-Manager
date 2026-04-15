@@ -18,26 +18,17 @@ def get_scheduler():
 
 def configure_scheduler():
     settings = get_settings()
-    cron_expr = settings.get("cron_expression", "0 2 * * *") # e.g. "0 2 * * *" or "*/5 * * * *"
+    cron_time = settings.get("cron_time", "02:00")
     
     # Remove existing jobs if any
     scheduler.remove_all_jobs()
     
     try:
-        # Split simplified cron expression (minute hour day month day_of_week)
-        parts = cron_expr.strip().split()
-        if len(parts) == 5:
-            trigger = CronTrigger(
-                minute=parts[0],
-                hour=parts[1],
-                day=parts[2],
-                month=parts[3],
-                day_of_week=parts[4]
-            )
-            scheduler.add_job(job_wrapper, trigger=trigger, id="batch_translation")
-            print(f"Scheduler configured with cron: {cron_expr}")
-        else:
-            print(f"Invalid cron expression: {cron_expr}, falling back to default 2 AM")
-            scheduler.add_job(job_wrapper, trigger=CronTrigger(hour=2, minute=0), id="batch_translation")
+        # Parse HH:MM
+        hours, minutes = cron_time.split(":")
+        trigger = CronTrigger(hour=int(hours), minute=int(minutes))
+        scheduler.add_job(job_wrapper, trigger=trigger, id="batch_translation")
+        print(f"Scheduler configured for everyday at: {cron_time}")
     except Exception as e:
-        print(f"Error configuring scheduler: {e}")
+        print(f"Error configuring scheduler (Invalid time format {cron_time}): {e}, falling back to default 2 AM")
+        scheduler.add_job(job_wrapper, trigger=CronTrigger(hour=2, minute=0), id="batch_translation")

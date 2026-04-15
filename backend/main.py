@@ -46,6 +46,7 @@ def write_config(settings: dict):
 
 @app.get("/api/media")
 def list_media():
+    import re
     settings = get_settings()
     films_path = settings.get("films_path", "/Films")
     series_path = settings.get("series_path", "/Series")
@@ -55,30 +56,48 @@ def list_media():
     for path, kind in [(films_path, "film"), (series_path, "series")]:
         if os.path.exists(path):
             for root, dirs, files in os.walk(path):
-                # Check directly in the root where .srt files exist
+                # Search for any subtitle files representing an episode/movie
                 for file in files:
                     file_lower = file.lower()
                     if file_lower.endswith(".srt"):
-                        # If we found an SRT, identify its base
-                        is_eng = any(x in file_lower for x in [".en.", ".eng.", ".hi.", ".en.hi.", ".eng.hi."])
-                        is_nl = any(x in file_lower for x in [".nl.", ".dut."])
-                        # Register directory mapping
-                        existing = next((m for m in media if m["path"] == root), None)
+                        # Define the core "show_name_episode" base
+                        base_name_match = re.sub(r'\.(en|eng|hi|nl|dut|en\.hi|eng\.hi)\.srt$', '', file, flags=re.IGNORECASE)
+                        if base_name_match == file:
+                            base_name_match = file.replace(".srt", "")
+                            
+                        full_base_path = os.path.join(root, base_name_match)
+                        
+                        # Find if we already registered this episode/video
+                        existing = next((m for m in media if m["base_path"] == full_base_path), None)
                         if not existing:
+                            # Parse out directory path context for neat display
+                            rel_path = os.path.relpath(root, start=path)
+                            display_dir = rel_path if rel_path != "." else os.path.basename(root)
+
                             existing = {
-                                "path": root,
-                                "name": os.path.basename(root),
+                                "base_path": full_base_path,
+                                "name": base_name_match, 
+                                "group": display_dir, 
                                 "kind": kind,
                                 "has_en": False,
                                 "has_nl": False,
+                                "has_bak": False,
                                 "en_file": None,
-                                "nl_file": None
+                                "nl_file": None,
+                                "bak_file": None
                             }
                             media.append(existing)
+                        
+                        is_eng = any(x in file_lower for x in [".en.", ".eng.", ".hi.", ".en.hi.", ".eng.hi."])
+                        is_nl = any(x in file_lower for x in [".nl.", ".dut."])
                         
                         if is_eng:
                             existing["has_en"] = True
                             existing["en_file"] = os.path.join(root, file)
+                            bak_path = os.path.join(root, file) + ".bak"
+                            if os.path.exists(bak_path):
+                                existing["has_bak"] = True
+                                existing["bak_file"] = bak_path
                         if is_nl:
                             existing["has_nl"] = True
                             existing["nl_file"] = os.path.join(root, file)
@@ -86,12 +105,14 @@ def list_media():
 
 @app.post("/api/translate")
 async def api_translate_single(request: Request, background_tasks: BackgroundTasks):
+    from core.batch import append_log
     data = await request.json()
     file_path = data.get("file_path")
     if not file_path or not os.path.exists(file_path):
         return JSONResponse(status_code=400, content={"error": "File not found"})
     
-    background_tasks.add_task(translate_single_file, file_path)
+    append_log(f"🟢 [HANDMATIG] Translate request triggered for {os.path.basename(file_path)}")
+    background_tasks.add_task(translate_single_file, file_path, log_callback=append_log)
     return {"status": "started", "file": file_path}
 
 @app.get("/api/srt")
@@ -139,11 +160,49 @@ async def stream_logs(request: Request):
 
 @app.post("/api/refresh")
 async def trigger_refresh(request: Request):
-    # Dummy webhook for jellyfin
-    # Typically POST to http://jellyfin:8096/Library/Refresh?api_key=...
+    import httpx
+    settings = get_settings()
+    webhook = settings.get("jellyfin_webhook")
+    
+    if webhook:
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(webhook)
+                return {"status": "Webhook triggered", "code": res.status_code}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+    return {"status": "No webhook configured"}
+
+@app.post("/api/test_model")
+async def test_model(request: Request):
+    import google.generativeai as genai
     data = await request.json()
-    # Implement standard HTTPX post with settings
-    return {"status": "webhook triggered"}
+    api_key = data.get("gemini_api_key")
+    ai_model = data.get("ai_model", "gemini-1.5-flash")
+    if not api_key:
+        return JSONResponse(status_code=400, content={"error": "API Key is required to test."})
+        
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(ai_model)
+        res = model.generate_content("Respond with exactly one word: 'SUCCESS'")
+        return {"result": f"Connection successful! Model replied: {res.text.strip()}"}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"Connection failed: {str(e)}"})
+
+@app.post("/api/restore_backup")
+async def restore_backup(request: Request):
+    import shutil
+    data = await request.json()
+    bak_file = data.get("bak_file")
+    if not bak_file or not bak_file.endswith(".bak"):
+        return JSONResponse(status_code=400, content={"error": "Invalid backup file"})
+        
+    original_target = bak_file[:-4] # removes .bak
+    if os.path.exists(bak_file):
+        shutil.copy2(bak_file, original_target)
+        return {"status": "restored"}
+    return JSONResponse(status_code=404, content={"error": "Backup file not found"})
 
 # --- Serve Frontend SPA ---
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")

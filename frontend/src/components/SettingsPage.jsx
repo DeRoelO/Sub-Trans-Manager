@@ -8,6 +8,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [batchRunning, setBatchRunning] = useState(false)
   const [logs, setLogs] = useState([])
+  const [testResult, setTestResult] = useState(null)
   const logEndRef = useRef(null)
 
   useEffect(() => {
@@ -58,7 +59,7 @@ export default function SettingsPage() {
   const saveConfig = async (e) => {
     e.preventDefault()
     try {
-      await fetch(`${API_BASE}/config`, {
+      const resp = await fetch(`${API_BASE}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -67,9 +68,32 @@ export default function SettingsPage() {
           batch_delay: parseInt(config.batch_delay) || 60
         })
       })
-      alert("Instellingen opgeslagen!")
+      if (!resp.ok) {
+         alert("Fout bij opslaan! Controleer of Proxmox schrijf/UID 33 permissies toelaat voor de config directory.")
+      } else {
+         alert("Instellingen succesvol opgeslagen!")
+      }
     } catch (err) {
-      alert("Fout bij opslaan indens.")
+      alert("Netwerkfout bij opslaan indens.")
+    }
+  }
+
+  const testModel = async () => {
+    setTestResult("Testen...")
+    try {
+      const resp = await fetch(`${API_BASE}/test_model`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gemini_api_key: config.gemini_api_key, ai_model: config.ai_model || "gemini-1.5-flash" })
+      })
+      const data = await resp.json()
+      if (resp.ok) {
+        setTestResult(data.result)
+      } else {
+        setTestResult("Fout: " + data.error)
+      }
+    } catch (err) {
+      setTestResult("Netwerkfout tijdens testen.")
     }
   }
 
@@ -106,13 +130,37 @@ export default function SettingsPage() {
             </div>
             
             <div className="form-group">
-              <label>Cron Schema (APScheduler)</label>
+              <label>AI Model</label>
               <input 
                 type="text" 
-                value={config.cron_expression || ''} 
-                onChange={(e) => handleConfigChange('cron_expression', e.target.value)}
-                placeholder="0 2 * * * (2 AM elke dag)"
+                value={config.ai_model || ''} 
+                onChange={(e) => handleConfigChange('ai_model', e.target.value)}
+                placeholder="gemini-1.5-flash"
               />
+            </div>
+
+            <div className="form-group">
+              <label>Doeltaal (Vertaal naar)</label>
+              <input 
+                type="text" 
+                value={config.target_language || ''} 
+                onChange={(e) => handleConfigChange('target_language', e.target.value)}
+                placeholder="Dutch"
+              />
+            </div>
+
+            {testResult && <div style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', marginBottom: '1rem', fontSize: '13px' }}>{testResult}</div>}
+            
+            <button type="button" onClick={testModel} style={{ marginBottom: '1rem', background: 'rgba(255,255,255,0.1)' }}>⚡ Test Verbinding</button>
+
+            <div className="form-group">
+              <label>Dagelijks Automatisch Starten Om:</label>
+              <input 
+                type="time" 
+                value={config.cron_time || ''} 
+                onChange={(e) => handleConfigChange('cron_time', e.target.value)}
+              />
+              <span className="text-muted" style={{ fontSize: '12px', marginTop: '4px', display: 'block' }}>Kies op welk tijdstip de automatische translator taak start.</span>
             </div>
 
             <div className="form-group">
@@ -139,11 +187,12 @@ export default function SettingsPage() {
                 type="text" 
                 value={config.jellyfin_webhook || ''} 
                 onChange={(e) => handleConfigChange('jellyfin_webhook', e.target.value)}
-                placeholder="http://192.168.1.50:8096/Library/Refresh..."
+                placeholder="http://IP:8096/Library/Refresh?api_key=XYZ..."
               />
+              <span className="text-muted" style={{ fontSize: '12px', marginTop: '4px', display: 'block' }}>Zodra vertalingen gedaan zijn, krijgt Jellyfin via deze URL meteen een prikkel om z'n bibliotheek te her-indexeren, mocht je dat willen.</span>
             </div>
 
-            <button type="submit" className="mt-4"><Save size={16} /> Opslaan</button>
+            <button type="submit" className="mt-4"><Save size={16} /> Opslaan in Config</button>
           </form>
         </div>
 

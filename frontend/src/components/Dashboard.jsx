@@ -39,6 +39,28 @@ export default function Dashboard() {
     }
   }
 
+  const handleRestoreBackup = async (bakPath) => {
+    if (!confirm("Weet je zeker dat je de backup wilt herstellen? Dit overschrijft de huidige vertaling.")) return;
+    try {
+      await fetch(`${API_BASE}/restore_backup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bak_file: bakPath })
+      })
+      alert("Backup succesvol hersteld!")
+      fetchMedia()
+    } catch (err) {
+      alert("Fout bij herstellen backup.")
+    }
+  }
+
+  const groupedMedia = media.reduce((acc, item) => {
+    const g = item.group || "Overig";
+    if (!acc[g]) acc[g] = [];
+    acc[g].push(item);
+    return acc;
+  }, {});
+
   return (
     <div className="flex-col gap-4">
       <div className="flex justify-between items-center mb-4">
@@ -55,33 +77,47 @@ export default function Dashboard() {
           <p className="text-muted">Geen items gevonden. Controleer of de paden correct zijn ingesteld.</p>
         </div>
       ) : (
-        <div className="media-grid">
-          {media.map((item, idx) => (
-            <div key={idx} className="glass-panel media-card flex-col gap-4">
-              <div>
-                <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>{item.name}</h3>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{item.kind.toUpperCase()}</span>
-              </div>
-              
-              <div className="flex gap-2">
-                {item.has_en ? <span className="badge en">EN SRT</span> : <span className="badge none">Geen EN</span>}
-                {item.has_nl ? <span className="badge nl">NL SRT</span> : <span className="badge none">Geen NL</span>}
-              </div>
+        <div className="flex-col gap-8">
+          {Object.entries(groupedMedia).map(([groupName, items]) => (
+            <div key={groupName}>
+              <h3 style={{ marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem' }}>{groupName}</h3>
+              <div className="media-grid">
+                {items.map((item, idx) => (
+                  <div key={idx} className="glass-panel media-card flex-col gap-4">
+                    <div>
+                      <h4 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>{item.name}</h4>
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      {item.has_en ? <span className="badge en">EN</span> : <span className="badge none">Geen EN</span>}
+                      {item.has_nl ? <span className="badge nl">NL</span> : <span className="badge none">Geen NL</span>}
+                      {item.has_bak && <span className="badge" style={{ background: '#795548', color: 'white' }}>BAK</span>}
+                    </div>
 
-              <div className="flex gap-2 mt-4" style={{ marginTop: 'auto' }}>
-                {item.has_en && !item.has_nl && (
-                  <button onClick={() => handleTranslate(item.en_file)} className="w-full">
-                    <Play size={16} /> Vertaal Nu
-                  </button>
-                )}
-                {item.has_nl && (
-                  <button 
-                    onClick={() => navigate(`/editor?file=${encodeURIComponent(item.en_file)}`)} 
-                    className="w-full secondary"
-                  >
-                    <FileEdit size={16} /> Editor
-                  </button>
-                )}
+                    <div className="flex-col gap-2 mt-4" style={{ marginTop: 'auto' }}>
+                      <div className="flex gap-2">
+                        {item.has_en && (
+                          <button onClick={() => handleTranslate(item.en_file)} className="w-full" style={{ padding: '0.5rem' }}>
+                            <Play size={14} /> Vertaal
+                          </button>
+                        )}
+                        {item.has_nl && (
+                          <button 
+                            onClick={() => navigate(`/editor?file=${encodeURIComponent(item.en_file)}`)} 
+                            className="w-full secondary" style={{ padding: '0.5rem' }}
+                          >
+                            <FileEdit size={14} /> Edit
+                          </button>
+                        )}
+                      </div>
+                      {item.has_bak && (
+                        <button onClick={() => handleRestoreBackup(item.bak_file)} className="w-full danger" style={{ padding: '0.5rem', background: 'rgba(255,87,34,0.2)' }}>
+                          Herstel Backup (.bak)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
