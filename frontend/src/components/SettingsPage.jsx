@@ -92,7 +92,7 @@ export default function SettingsPage() {
   }
 
   const testModel = async () => {
-    setTestResult("Testen...")
+    setTestResult("Bezig met verbinden...")
     try {
       const resp = await fetch(`${API_BASE}/test_model`, {
         method: 'POST',
@@ -102,11 +102,15 @@ export default function SettingsPage() {
       const data = await resp.json()
       if (resp.ok) {
         setTestResult(data.result)
+        setAvailableModels(data.models || [])
       } else {
-        setTestResult("Fout: " + data.error)
+        setTestResult("Fout: " + (data.error || "Onbekende fout"))
+        if (data.models) {
+          setAvailableModels(data.models)
+        }
       }
     } catch (err) {
-      setTestResult("Netwerkfout tijdens testen.")
+      setTestResult("Netwerkfout tijdens verbinden.")
     }
   }
 
@@ -134,49 +138,50 @@ export default function SettingsPage() {
           <form onSubmit={saveConfig}>
             <div className="form-group">
               <label>Gemini API Key</label>
-              <input 
-                type="password" 
-                value={config.gemini_api_key || ''} 
-                onChange={(e) => handleConfigChange('gemini_api_key', e.target.value)}
-                placeholder="AIzaSy..."
-              />
-            </div>
-            
-            <div className="form-group">
-              <label>AI Model</label>
-              <div className="flex-col gap-2">
+              <div className="flex gap-2">
                 <input 
-                  type="text" 
-                  list="gemini-models"
-                  value={config.ai_model || ''} 
-                  onChange={(e) => handleConfigChange('ai_model', e.target.value)}
-                  placeholder="gemini-1.5-flash"
+                  type="password" 
+                  value={config.gemini_api_key || ''} 
+                  onChange={(e) => handleConfigChange('gemini_api_key', e.target.value)}
+                  placeholder="AIzaSy..."
+                  style={{ flex: 1 }}
                 />
-                <datalist id="gemini-models">
-                  {availableModels.map(m => <option key={m} value={m} />)}
-                  <option value="gemini-1.5-flash" />
-                  <option value="gemini-1.5-pro" />
-                  <option value="gemini-2.0-flash-exp" />
-                </datalist>
-                {availableModels.length > 0 && (
-                  <div className="flex gap-2 flex-wrap mt-2">
-                    {availableModels.slice(0, 5).map(m => (
-                      <span 
-                        key={m} 
-                        className="badge" 
-                        style={{ cursor: 'pointer', background: 'rgba(255,255,255,0.1)', fontSize: '11px' }}
-                        onClick={() => handleConfigChange('ai_model', m)}
-                      >
-                        {m}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <button type="button" onClick={testModel} className="secondary" style={{ whiteSpace: 'nowrap' }}>
+                  ⚡ Verbinding Maken
+                </button>
               </div>
             </div>
 
+            {testResult && (
+              <div style={{ 
+                padding: '0.75rem', 
+                background: testResult.includes('gelukt') ? 'rgba(76,175,80,0.1)' : 'rgba(244,67,54,0.1)', 
+                border: `1px solid ${testResult.includes('gelukt') ? 'rgba(76,175,80,0.3)' : 'rgba(244,67,54,0.3)'}`,
+                borderRadius: '8px', 
+                marginBottom: '1rem', 
+                fontSize: '13px' 
+              }}>
+                {testResult}
+              </div>
+            )}
+            
+            <div className="form-group" style={{ opacity: availableModels.length > 0 ? 1 : 0.5 }}>
+              <label>AI Model Selectie</label>
+              <select 
+                value={config.ai_model || ''} 
+                onChange={(e) => handleConfigChange('ai_model', e.target.value)}
+                disabled={availableModels.length === 0}
+                style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                <option value="">-- Kies eerst Verbinding maken --</option>
+                {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+                <option value="gemini-1.5-flash">gemini-1.5-flash (Default)</option>
+              </select>
+              {availableModels.length === 0 && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>Klik eerst op 'Verbinding Maken' om modellen op te halen.</span>}
+            </div>
+
             <div className="form-group">
-              <label>Doeltaal (Vertaal naar)</label>
+              <label>Doeltaal</label>
               <input 
                 type="text" 
                 value={config.target_language || ''} 

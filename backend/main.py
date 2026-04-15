@@ -184,13 +184,31 @@ async def test_model(request: Request):
         
     try:
         client = genai.Client(api_key=api_key)
+        # Test the connection with a simple prompt
         res = client.models.generate_content(
             model=ai_model,
             contents="Respond with exactly one word: 'SUCCESS'"
         )
-        return {"result": f"Connection successful! Model replied: {res.text.strip()}"}
+        # Also fetch available models to help the user
+        models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
+        
+        return {
+            "result": f"Verbinding gelukt! Model antwoordde: {res.text.strip()}",
+            "models": models
+        }
     except Exception as e:
-        return JSONResponse(status_code=400, content={"error": f"Connection failed: {str(e)}"})
+        # If the specific model failed but the key might be okay, try listing models anyway
+        try:
+            client = genai.Client(api_key=api_key)
+            models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
+            if models:
+                 return JSONResponse(status_code=400, content={
+                     "error": f"Model '{ai_model}' niet gevonden, maar API Key is GELDIG. Kies een ander model uit de lijst.",
+                     "models": models
+                 })
+        except:
+            pass
+        return JSONResponse(status_code=400, content={"error": f"Verbinding mislukt: {str(e)}"})
 
 @app.get("/api/models")
 async def get_available_models():
