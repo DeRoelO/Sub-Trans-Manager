@@ -192,6 +192,21 @@ async def test_model(request: Request):
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"Connection failed: {str(e)}"})
 
+@app.get("/api/models")
+async def get_available_models():
+    from google import genai
+    settings = get_settings()
+    api_key = settings.get("gemini_api_key")
+    if not api_key:
+        return {"models": []}
+    try:
+        client = genai.Client(api_key=api_key)
+        # Filter for models that support generateContent
+        models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
+        return {"models": models}
+    except:
+        return {"models": []}
+
 @app.post("/api/restore_backup")
 async def restore_backup(request: Request):
     import shutil

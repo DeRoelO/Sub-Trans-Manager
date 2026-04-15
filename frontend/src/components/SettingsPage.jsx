@@ -9,11 +9,13 @@ export default function SettingsPage() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [logs, setLogs] = useState([])
   const [testResult, setTestResult] = useState(null)
+  const [availableModels, setAvailableModels] = useState([])
   const logEndRef = useRef(null)
 
   useEffect(() => {
     fetchConfig()
     checkBatchStatus()
+    fetchModels()
 
     const eventSource = new EventSource(`${API_BASE}/logs`)
     eventSource.onmessage = (event) => {
@@ -36,10 +38,21 @@ export default function SettingsPage() {
       const res = await fetch(`${API_BASE}/config`)
       const data = await res.json()
       setConfig(data)
+      if (data.gemini_api_key) fetchModels()
     } catch (err) {
       console.error(err)
     }
     setLoading(false)
+  }
+
+  const fetchModels = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/models`)
+      const data = await res.json()
+      setAvailableModels(data.models || [])
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   const checkBatchStatus = async () => {
@@ -131,12 +144,35 @@ export default function SettingsPage() {
             
             <div className="form-group">
               <label>AI Model</label>
-              <input 
-                type="text" 
-                value={config.ai_model || ''} 
-                onChange={(e) => handleConfigChange('ai_model', e.target.value)}
-                placeholder="gemini-1.5-flash"
-              />
+              <div className="flex-col gap-2">
+                <input 
+                  type="text" 
+                  list="gemini-models"
+                  value={config.ai_model || ''} 
+                  onChange={(e) => handleConfigChange('ai_model', e.target.value)}
+                  placeholder="gemini-1.5-flash"
+                />
+                <datalist id="gemini-models">
+                  {availableModels.map(m => <option key={m} value={m} />)}
+                  <option value="gemini-1.5-flash" />
+                  <option value="gemini-1.5-pro" />
+                  <option value="gemini-2.0-flash-exp" />
+                </datalist>
+                {availableModels.length > 0 && (
+                  <div className="flex gap-2 flex-wrap mt-2">
+                    {availableModels.slice(0, 5).map(m => (
+                      <span 
+                        key={m} 
+                        className="badge" 
+                        style={{ cursor: 'pointer', background: 'rgba(255,255,255,0.1)', fontSize: '11px' }}
+                        onClick={() => handleConfigChange('ai_model', m)}
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="form-group">
