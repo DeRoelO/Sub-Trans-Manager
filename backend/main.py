@@ -179,43 +179,45 @@ async def test_model(request: Request):
     from google.genai import types
     data = await request.json()
     api_key = data.get("gemini_api_key")
-    ai_model = data.get("ai_model", "gemini-1.5-flash")
+    ai_model = data.get("ai_model") # Can be empty now
+    
     if not api_key:
-        return JSONResponse(status_code=400, content={"error": "API Key is vereist voor de test."})
+        return JSONResponse(status_code=400, content={"error": "Vul eerst een API Key in."})
         
-    # Clean up model name
-    ai_model = ai_model.replace("models/", "")
-
     errs = []
-    # Try both v1 and v1beta as some regions/keys behave differently
+    # Try both v1 and v1beta
     for version in ["v1", "v1beta"]:
         try:
-            # Note: In google-genai, the version is often handled by the library 
-            # or configurable in vertex vs ai studio. For AI Studio, we try different endpoint versions if needed.
-            # However, the SDK might not expose a direct version switch in the Client constructor yet in 0.3.0
-            # Let's try the default list first to see what's valid.
             client = genai.Client(api_key=api_key, http_options={'api_version': version})
             
-            # Fetch models first to verify if the model exists in this version
+            # Step 1: Just try to list models to validate the Key
             available = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
             
-            if ai_model in available or not available:
-                res = client.models.generate_content(
-                    model=ai_model,
-                    contents="Respond with exactly one word: 'SUCCESS'"
-                )
+            if available:
+                # Key is valid! 
+                result_msg = f"API Key is GELDIG (via {version})."
+                
+                # Step 2: If the user already had a model selected, try a quick test
+                if ai_model:
+                    try:
+                        ai_model_clean = ai_model.replace("models/", "")
+                        res = client.models.generate_content(
+                            model=ai_model_clean,
+                            contents="Respond with 'OK'"
+                        )
+                        result_msg += f" Model '{ai_model_clean}' reageert ook correct."
+                    except Exception as ge:
+                        result_msg += f" Waarschuwing: Gekozen model '{ai_model}' gaf fout: {str(ge)}"
+                
                 return {
-                    "result": f"Verbinding gelukt ({version})! Model antwoordde: {res.text.strip()}",
+                    "result": result_msg,
                     "models": available
                 }
-            else:
-                errs.append(f"{version}: Model niet gevonden in {len(available)} beschikbare modellen.")
         except Exception as e:
             errs.append(f"{version}: {str(e)}")
             
-    # If we are here, everything failed
     return JSONResponse(status_code=400, content={
-        "error": f"Verbinding mislukt op alle versies. {'; '.join(errs)}"
+        "error": f"Kan geen verbinding maken. Controleer je API Key. Fouten: {'; '.join(errs)}"
     })
 
 @app.get("/api/models")
