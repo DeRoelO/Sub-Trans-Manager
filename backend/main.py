@@ -176,39 +176,47 @@ async def trigger_refresh(request: Request):
 @app.post("/api/test_model")
 async def test_model(request: Request):
     from google import genai
+    from google.genai import types
     data = await request.json()
     api_key = data.get("gemini_api_key")
     ai_model = data.get("ai_model", "gemini-1.5-flash")
     if not api_key:
-        return JSONResponse(status_code=400, content={"error": "API Key is required to test."})
+        return JSONResponse(status_code=400, content={"error": "API Key is vereist voor de test."})
         
-    try:
-        client = genai.Client(api_key=api_key)
-        # Test the connection with a simple prompt
-        res = client.models.generate_content(
-            model=ai_model,
-            contents="Respond with exactly one word: 'SUCCESS'"
-        )
-        # Also fetch available models to help the user
-        models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
-        
-        return {
-            "result": f"Verbinding gelukt! Model antwoordde: {res.text.strip()}",
-            "models": models
-        }
-    except Exception as e:
-        # If the specific model failed but the key might be okay, try listing models anyway
+    # Clean up model name
+    ai_model = ai_model.replace("models/", "")
+
+    errs = []
+    # Try both v1 and v1beta as some regions/keys behave differently
+    for version in ["v1", "v1beta"]:
         try:
-            client = genai.Client(api_key=api_key)
-            models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
-            if models:
-                 return JSONResponse(status_code=400, content={
-                     "error": f"Model '{ai_model}' niet gevonden, maar API Key is GELDIG. Kies een ander model uit de lijst.",
-                     "models": models
-                 })
-        except:
-            pass
-        return JSONResponse(status_code=400, content={"error": f"Verbinding mislukt: {str(e)}"})
+            # Note: In google-genai, the version is often handled by the library 
+            # or configurable in vertex vs ai studio. For AI Studio, we try different endpoint versions if needed.
+            # However, the SDK might not expose a direct version switch in the Client constructor yet in 0.3.0
+            # Let's try the default list first to see what's valid.
+            client = genai.Client(api_key=api_key, http_options={'api_version': version})
+            
+            # Fetch models first to verify if the model exists in this version
+            available = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
+            
+            if ai_model in available or not available:
+                res = client.models.generate_content(
+                    model=ai_model,
+                    contents="Respond with exactly one word: 'SUCCESS'"
+                )
+                return {
+                    "result": f"Verbinding gelukt ({version})! Model antwoordde: {res.text.strip()}",
+                    "models": available
+                }
+            else:
+                errs.append(f"{version}: Model niet gevonden in {len(available)} beschikbare modellen.")
+        except Exception as e:
+            errs.append(f"{version}: {str(e)}")
+            
+    # If we are here, everything failed
+    return JSONResponse(status_code=400, content={
+        "error": f"Verbinding mislukt op alle versies. {'; '.join(errs)}"
+    })
 
 @app.get("/api/models")
 async def get_available_models():
@@ -217,13 +225,16 @@ async def get_available_models():
     api_key = settings.get("gemini_api_key")
     if not api_key:
         return {"models": []}
-    try:
-        client = genai.Client(api_key=api_key)
-        # Filter for models that support generateContent
-        models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
-        return {"models": models}
-    except:
-        return {"models": []}
+        
+    for version in ["v1", "v1beta"]:
+        try:
+            client = genai.Client(api_key=api_key, http_options={'api_version': version})
+            models = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in m.supported_generation_methods]
+            if models:
+                return {"models": models, "version": version}
+        except:
+            continue
+    return {"models": []}
 
 @app.post("/api/restore_backup")
 async def restore_backup(request: Request):
