@@ -251,6 +251,37 @@ async def restore_backup(request: Request):
         return {"status": "restored"}
     return JSONResponse(status_code=404, content={"error": "Backup file not found"})
 
+def detect_is_wrong_language(file_path: str, target_lang: str) -> bool:
+    """Heuristic logic to detect if a file is likely still in English."""
+    try:
+        # We only need a sample
+        with open(file_path, "rb") as f:
+            bytes_data = f.read(10000) # first 10KB
+        encoding = detect_encoding(bytes_data) or 'utf-8'
+        text = bytes_data.decode(encoding, errors='ignore').lower()
+        
+        # Heuristic word lists
+        en_words = {' the ', ' and ', ' was ', ' that ', ' with ', ' you ', ' for ', ' have ', ' is ', ' it ', ' what ', ' are '}
+        lang_maps = {
+            "dutch": {' de ', ' het ', ' een ', ' en ', ' van ', ' ik ', ' is ', ' dat ', ' op ', ' te ', ' met ', ' om '},
+            "french": {' le ', ' la ', ' les ', ' et ', ' un ', ' une ', ' est ', ' dans ', ' que '},
+            "german": {' der ', ' die ', ' das ', ' und ', ' ein ', ' eine ', ' ist ', ' met ', ' nicht '},
+            "spanish": {' el ', ' la ', ' los ', ' y ', ' en ', ' un ', ' una ', ' que ', ' con '}
+        }
+        
+        target_words = lang_maps.get(target_lang.lower(), set())
+        if not target_words: return False # Can't detect
+        
+        en_score = sum(1 for w in en_words if w in text)
+        target_score = sum(1 for w in target_words if w in text)
+        
+        # If English function words are significantly more frequent than target language, it's suspicious
+        if en_score > target_score and en_score > 3:
+            return True
+        return False
+    except:
+        return False
+
 @app.get("/api/audit/list")
 async def audit_list():
     settings = get_settings()
@@ -278,12 +309,25 @@ async def audit_list():
                     file_lower = file.lower()
                     if any(file_lower.endswith(ext) for ext in valid_extensions):
                         full_path = os.path.join(root, file)
+                        is_suspicious = detect_is_wrong_language(full_path, target_lang)
                         results.append({
                             "name": file,
                             "path": full_path,
-                            "rel_path": os.path.relpath(full_path, start=path)
+                            "rel_path": os.path.relpath(full_path, start=path),
+                            "is_suspicious": is_suspicious
                         })
     return {"files": results}
+
+@app.post("/api/audit/delete_suspicious")
+async def audit_delete_suspicious(request: Request):
+    data = await request.json()
+    paths = data.get("paths", [])
+    deleted_count = 0
+    for p in paths:
+        if os.path.exists(p):
+            os.remove(p)
+            deleted_count += 1
+    return {"status": "success", "count": deleted_count}
 
 @app.get("/api/audit/sample")
 async def audit_sample(file_path: str):
