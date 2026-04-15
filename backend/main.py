@@ -175,7 +175,7 @@ async def trigger_refresh(request: Request):
 
 @app.post("/api/test_model")
 async def test_model(request: Request):
-    import google.generativeai as genai
+    from google import genai
     data = await request.json()
     api_key = data.get("gemini_api_key")
     ai_model = data.get("ai_model", "gemini-1.5-flash")
@@ -183,9 +183,11 @@ async def test_model(request: Request):
         return JSONResponse(status_code=400, content={"error": "API Key is required to test."})
         
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(ai_model)
-        res = model.generate_content("Respond with exactly one word: 'SUCCESS'")
+        client = genai.Client(api_key=api_key)
+        res = client.models.generate_content(
+            model=ai_model,
+            contents="Respond with exactly one word: 'SUCCESS'"
+        )
         return {"result": f"Connection successful! Model replied: {res.text.strip()}"}
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"Connection failed: {str(e)}"})

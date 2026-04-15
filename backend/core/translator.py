@@ -4,8 +4,8 @@ import json
 import time
 import chardet
 from typing import List, Dict, Any
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google import genai
+from google.genai import types
 
 def detect_encoding(file_byte: bytes) -> str:
     return chardet.detect(file_byte)['encoding']
@@ -26,7 +26,7 @@ def chunk_text(parsed_data: List[Dict[str, str]], chunk_size: int = 1500) -> Lis
     if current_chunk: chunks.append(current_chunk)
     return chunks
 
-def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
+def translate_chunk(client, model_name: str, texts: List[str], target_language: str) -> List[str]:
     input_json = json.dumps({"items": [{"id": i, "text": t} for i, t in enumerate(texts)]}, ensure_ascii=False)
     prompt = (
         f"Translate the 'text' field in the following JSON objects to {target_language}. "
@@ -35,16 +35,26 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
         "Output ONLY valid JSON matching the input structure.\n"
         f"[INPUT]\n{input_json}"
     )
-    safety = { 
-        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE, 
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE, 
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE, 
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE 
-    }
     
+    safety = [
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE)
+    ]
+    
+    config = types.GenerateContentConfig(
+        temperature=0.1,
+        safety_settings=safety
+    )
+
     for attempt in range(2):
         try:
-            res = model.generate_content(prompt, safety_settings=safety, generation_config={"temperature": 0.1})
+            res = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config
+            )
             start_idx = res.text.find('{')
             end_idx = res.text.rfind('}')
             if start_idx == -1 or end_idx == -1:
@@ -95,8 +105,7 @@ def translate_single_file(input_file: str, log_callback=None):
 
     if log_callback: log_callback(f"[HANDMATIG] Using model: {ai_model_name}, Target: {target_language}")
         
-    genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel(ai_model_name)
+    client = genai.Client(api_key=API_KEY)
     
     with open(input_file, 'rb') as f: bytes_data = f.read()
     encoding = detect_encoding(bytes_data) or 'utf-8'
@@ -111,7 +120,7 @@ def translate_single_file(input_file: str, log_callback=None):
     total_chunks = len(chunks)
     
     for idx, chunk in enumerate(chunks):
-        all_results.append(translate_chunk(model, [item['text'] for item in chunk], target_language))
+        all_results.append(translate_chunk(client, ai_model_name, [item['text'] for item in chunk], target_language))
         if log_callback: log_callback(f"Translated chunk {idx + 1}/{total_chunks}")
         time.sleep(1)
         
