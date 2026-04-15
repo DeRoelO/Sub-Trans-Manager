@@ -14,9 +14,7 @@ export default function Editor() {
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
   
-  const enScrollRef = useRef(null)
-  const nlScrollRef = useRef(null)
-  const isSyncing = useRef(false)
+  const scrollRef = useRef(null)
 
   useEffect(() => {
     if (!filePathEn) return
@@ -63,17 +61,7 @@ export default function Editor() {
     }
   }
 
-  const syncScroll = (source, target) => {
-    if (isSyncing.current) return
-    isSyncing.current = true
-    if (target.current) {
-      target.current.scrollTop = source.current.scrollTop
-    }
-    // Small timeout to release the lock after the passive scroll finishes
-    setTimeout(() => {
-      isSyncing.current = false
-    }, 50)
-  }
+
 
   if (!filePathEn) return <p>Geen bestand geselecteerd.</p>
 
@@ -92,52 +80,44 @@ export default function Editor() {
       </div>
 
       {loading ? <p>Laden...</p> : (
-        <div className="editor-grid">
-          <div className="glass-panel editor-pane">
-            <div className="editor-header">English ({filePathEn.split(/[\\/]/).pop()})</div>
-            <div 
-              className="editor-content" 
-              ref={enScrollRef} 
-              onScroll={() => syncScroll(enScrollRef, nlScrollRef)}
-            >
-              {enSrt.map((item, idx) => (
-                <div key={idx} className="form-group" style={{ marginBottom: '0.5rem' }}>
-                  <label style={{ fontSize: '0.75rem', marginBottom: '0.2rem' }}>{item.time}</label>
-                  <div style={{ background: 'rgba(255,255,255,0.05)', padding: '0.75rem', borderRadius: '8px', fontSize: '0.9rem' }}>
-                    {item.text}
+        <div className="glass-panel editor-container" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="editor-row-header" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid var(--card-border)', fontWeight: 'bold' }}>
+             <div style={{ padding: '0.75rem 1rem' }}>Original (English)</div>
+             <div style={{ padding: '0.75rem 1rem' }}>Translation (Dutch)</div>
+          </div>
+          <div className="editor-main-scroll" ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+            {enSrt.map((item, idx) => {
+              const nlItem = nlSrt.find(n => n.index === item.index) || { text: '' }
+              return (
+                <div key={idx} className="editor-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1.5rem' }}>
+                  <div className="en-col">
+                    <label style={{ fontSize: '0.7rem', color: 'var(--accent)', marginBottom: '0.5rem', display: 'block' }}>#{item.index} | {item.time}</label>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '8px', fontSize: '0.95rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+                      {item.text}
+                    </div>
+                  </div>
+                  <div className="nl-col">
+                    <label style={{ fontSize: '0.7rem', color: 'var(--success)', marginBottom: '0.5rem', display: 'block' }}>Vertaling</label>
+                    <textarea 
+                      value={nlItem.text}
+                      onChange={(e) => handleTextChange(item.index, e.target.value)}
+                      placeholder="Typ vertaling hier..."
+                      style={{ 
+                        background: 'rgba(0,0,0,0.3)', 
+                        border: '1px solid var(--card-border)', 
+                        color: 'white', 
+                        padding: '1rem', 
+                        borderRadius: '8px', 
+                        fontFamily: 'var(--font-body)',
+                        width: '100%',
+                        minHeight: '80px',
+                        resize: 'vertical'
+                      }}
+                    />
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-          
-          <div className="glass-panel editor-pane">
-            <div className="editor-header">Dutch ({filePathNl ? filePathNl.split(/[\\/]/).pop() : '...'})</div>
-            <div 
-              className="editor-content" 
-              ref={nlScrollRef} 
-              onScroll={() => syncScroll(nlScrollRef, enScrollRef)}
-            >
-              {nlSrt.map((item, idx) => (
-                <div key={idx} className="form-group" style={{ marginBottom: '0.5rem' }}>
-                  <label style={{ fontSize: '0.75rem', marginBottom: '0.2rem' }}>{item.time}</label>
-                  <textarea 
-                    value={item.text}
-                    onChange={(e) => handleTextChange(item.index, e.target.value)}
-                    style={{ 
-                      background: 'rgba(0,0,0,0.2)', 
-                      border: '1px solid var(--card-border)', 
-                      color: 'white', 
-                      padding: '0.75rem', 
-                      borderRadius: '8px', 
-                      fontFamily: 'var(--font-body)',
-                      resize: 'vertical',
-                      minHeight: '60px'
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
+              )
+            })}
           </div>
         </div>
       )}
