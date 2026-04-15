@@ -14,7 +14,7 @@ def parse_srt(content: str) -> List[Dict[str, str]]:
     pattern = re.compile(r'(\d+)\s*\n(\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3})\s*\n((?:.|\n)*?)(?=\n\d+\s*\n|\Z)', re.MULTILINE)
     return [{'index': m[0], 'time': m[1], 'text': m[2].strip()} for m in pattern.findall(content)]
 
-def chunk_text(parsed_data: List[Dict[str, str]], chunk_size: int = 1500) -> List[List[Dict[str, str]]]:
+def chunk_text(parsed_data: List[Dict[str, str]], chunk_size: int = 10000) -> List[List[Dict[str, str]]]:
     chunks, current_chunk, current_length = [], [], 0
     for item in parsed_data:
         text_len = len(item['text'])
@@ -41,9 +41,14 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
         force_msg = "" if attempt == 0 else "IMPORTANT: You previously failed or returned English. You MUST translate to the target language now! "
         
         prompt = (
-            f"{force_msg}Translate the 'text' field in the following JSON objects to {target_language}. "
-            "Keep the 'id' intact. Use informal phrasing (e.g., 'je/jou' for Dutch). "
-            "Output ONLY valid JSON matching the input structure.\n"
+            f"{force_msg}Je bent een expert in het vertalen van film-script en ondertitels. "
+            f"Vertaal de 'text' velden in het JSON-object naar natuurlijk en informeel {target_language} (gebruik 'je/jij'). "
+            "Kijk naar de voorgaande en volgende regels in deze lijst om de context en flow van het gesprek te begrijpen. "
+            "BELANGRIJK: Voorkom letterlijke vertalingen die onnatuurlijk klinken. "
+            "Voorbeelden van hoe het MOET:\n"
+            "- 'one word of this' -> 'geen woord hierover' (NIET: 'een woord hiervan')\n"
+            "- 'You will never breathe...' -> 'Je zult nooit meer...' (zorg dat de zin natuurlijk loopt)\n"
+            "Zorg dat het id exact hetzelfde blijft. Output alleen de JSON.\n"
             f"[INPUT]\n{input_json}"
         )
         
