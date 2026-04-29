@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks, File, UploadFile, Request
 from fastapi.responses import JSONResponse, FileResponse
@@ -10,20 +11,16 @@ from sse_starlette.sse import EventSourceResponse
 
 from core.translator import translate_single_file, parse_srt, detect_encoding
 from core.batch import start_batch_job, stop_batch_job, get_batch_status, get_log_generator
-from core.config import get_settings, update_settings
-from core.utils import is_dutch_variant, detect_is_wrong_language
+from core.config import get_settings, update_settings, SUPPORTED_LANGUAGES
+from core.utils import is_target_language_file, detect_is_wrong_language
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Retrieve settings to initialize scheduler if it's supposed to be active
     from core.scheduler import get_scheduler, configure_scheduler
-    
     configure_scheduler()
     scheduler = get_scheduler()
     scheduler.start()
-    
     yield
-    
     scheduler.shutdown()
 
 app = FastAPI(title="Sub-Trans Manager", lifespan=lifespan)
@@ -45,12 +42,16 @@ def read_config():
 def write_config(settings: dict):
     return update_settings(settings)
 
+@app.get("/api/languages")
+def list_languages():
+    return {"languages": SUPPORTED_LANGUAGES}
+
 @app.get("/api/media")
 def list_media():
-    import re
     settings = get_settings()
     films_path = settings.get("films_path", "/Films")
     series_path = settings.get("series_path", "/Series")
+    target_tag = settings.get("target_language_tag", "nl").upper()
     
     media = []
     
@@ -60,15 +61,10 @@ def list_media():
                 for file in files:
                     file_lower = file.lower()
                     if file_lower.endswith(".srt"):
-                        # Extract base name by removing .srt and any language/modifier tags
-                        # This regex matches .[lang].srt, .[lang].[hi/sdh/forced].srt, etc.
-                        # We use a broad match for the language tag unless it's Dutch
-                        
-                        # Step 1: Detect if it's Dutch
-                        is_nl = is_dutch_variant(file)
+                        # Step 1: Detect if it's the target language
+                        is_target = is_target_language_file(file)
                         
                         # Step 2: Try to extract a base name
-                        # We look for the LAST occurrence of a language-like tag
                         base_name_match = re.sub(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', '', file, flags=re.IGNORECASE)
                         if base_name_match == file:
                             base_name_match = file.replace(".srt", "")
@@ -89,28 +85,25 @@ def list_media():
                                 "group": display_dir, 
                                 "subpath": rel_path if rel_path != display_dir else "",
                                 "kind": kind,
-                                "has_en": False, # We keep 'has_en' for frontend compatibility but it means 'has_source'
-                                "has_nl": False,
+                                "has_source": False,
+                                "has_target": False,
                                 "has_bak": False,
-                                "en_file": None,
-                                "nl_file": None,
-                                "bak_file": None
+                                "source_file": None,
+                                "target_file": None,
+                                "bak_file": None,
+                                "target_tag": target_tag
                             }
                             media.append(existing)
                         
-                        if is_nl:
-                            existing["has_nl"] = True
-                            existing["nl_file"] = os.path.join(root, file)
+                        if is_target:
+                            existing["has_target"] = True
+                            existing["target_file"] = os.path.join(root, file)
                         else:
-                            # Any non-Dutch SRT is a potential source
-                            # If we already have a source, we might want to prioritize .en. or similar, 
-                            # but for now let's just take the first one or prioritize if it has a tag
                             is_tagged = re.search(r'\.[a-z]{2,3}\.srt$', file_lower)
-                            if not existing["has_en"] or is_tagged:
-                                existing["has_en"] = True
-                                existing["en_file"] = os.path.join(root, file)
+                            if not existing["has_source"] or is_tagged:
+                                existing["has_source"] = True
+                                existing["source_file"] = os.path.join(root, file)
                         
-                        # Check for backups
                         bak_path = os.path.join(root, file) + ".bak"
                         if os.path.exists(bak_path):
                             existing["has_bak"] = True
@@ -126,7 +119,7 @@ async def api_translate_single(request: Request, background_tasks: BackgroundTas
     if not file_path or not os.path.exists(file_path):
         return JSONResponse(status_code=400, content={"error": "File not found"})
     
-    append_log(f"🟢 [HANDMATIG] Translate request triggered for {os.path.basename(file_path)}")
+    append_log(f"🟢 [MANUAL] Translation request triggered for {os.path.basename(file_path)}")
     background_tasks.add_task(translate_single_file, file_path, log_callback=append_log)
     return {"status": "started", "file": file_path}
 
@@ -150,9 +143,12 @@ async def save_srt(request: Request):
     if not file_path or not parsed:
         return JSONResponse(status_code=400, content={"error": "Invalid request"})
         
-    final_srt = "\n".join([f"{o['index']}\n{o['time']}\n{o['text']}\n" for o in parsed])
+    final_srt = ""
+    for o in parsed:
+        final_srt += f"{o['index']}\n{o['time']}\n{o['text']}\n\n"
+    
     with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(final_srt)
+        f.write(final_srt.strip() + "\n")
     return {"status": "saved"}
 
 @app.get("/api/batch")
@@ -196,51 +192,38 @@ async def test_model(request: Request):
     ai_model = data.get("ai_model", "gemini-2.0-flash")
     
     if not api_key:
-        return JSONResponse(status_code=400, content={"error": "Vul eerst een API Key in."})
+        return JSONResponse(status_code=400, content={"error": "Please enter an API Key first."})
         
     try:
         genai.configure(api_key=api_key)
-        # Just listing models is the best way to test the key
-        available = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                available.append(m.name.replace("models/", ""))
+        available = [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
         if not available:
-            return JSONResponse(status_code=400, content={"error": "API Key is geldig, maar geen modellen gevonden voor dit project."})
+            return JSONResponse(status_code=400, content={"error": "API Key is valid, but no models found for this project."})
             
-        result_msg = "API Key is GELDIG."
-        
-        # Optional: test specific model if provided
+        result_msg = "API Key is VALID."
         if ai_model:
             try:
                 model = genai.GenerativeModel(ai_model)
                 res = model.generate_content("Respond with 'OK'")
-                result_msg += f" Model '{ai_model}' reageert ook correct."
+                result_msg += f" Model '{ai_model}' is also responding correctly."
             except Exception as ge:
-                result_msg += f" Waarschuwing: Model '{ai_model}' gaf een fout (mogelijk niet beschikbaar): {str(ge)}"
+                result_msg += f" Warning: Model '{ai_model}' failed (might not be available): {str(ge)}"
         
-        return {
-            "result": result_msg,
-            "models": available
-        }
+        return {"result": result_msg, "models": available}
     except Exception as e:
-        return JSONResponse(status_code=400, content={"error": f"Verbinding mislukt: {str(e)}"})
+        return JSONResponse(status_code=400, content={"error": f"Connection failed: {str(e)}"})
 
 @app.get("/api/models")
 async def get_available_models():
     import google.generativeai as genai
     settings = get_settings()
     api_key = settings.get("gemini_api_key")
-    if not api_key:
-        return {"models": []}
-        
+    if not api_key: return {"models": []}
     try:
         genai.configure(api_key=api_key)
-        models = [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        return {"models": models}
-    except:
-        return {"models": []}
+        return {"models": [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]}
+    except: return {"models": []}
 
 @app.post("/api/restore_backup")
 async def restore_backup(request: Request):
@@ -249,8 +232,7 @@ async def restore_backup(request: Request):
     bak_file = data.get("bak_file")
     if not bak_file or not bak_file.endswith(".bak"):
         return JSONResponse(status_code=400, content={"error": "Invalid backup file"})
-        
-    original_target = bak_file[:-4] # removes .bak
+    original_target = bak_file[:-4]
     if os.path.exists(bak_file):
         shutil.copy2(bak_file, original_target)
         return {"status": "restored"}
@@ -261,22 +243,15 @@ async def audit_untagged():
     settings = get_settings()
     films_path = settings.get("films_path", "/Films")
     series_path = settings.get("series_path", "/Series")
-    
     results = []
     for path in [films_path, series_path]:
         if os.path.exists(path):
             for root, dirs, files in os.walk(path):
                 for file in files:
                     if file.lower().endswith(".srt"):
-                        # Check if it has a language tag (e.g. .en.srt, .nl.srt)
-                        # We consider it untagged if there's no tag or only generic tags like .hi. or .sdh.
-                        if not re.search(r'\.[a-z]{2,3}(\.[a-z]{2,8})?\.srt$', file, flags=re.IGNORECASE):
+                        if not re.search(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', file, flags=re.IGNORECASE):
                             full_path = os.path.join(root, file)
-                            results.append({
-                                "name": file,
-                                "path": full_path,
-                                "rel_path": os.path.relpath(full_path, start=path)
-                            })
+                            results.append({"name": file, "path": full_path, "rel_path": os.path.relpath(full_path, start=path)})
     return {"files": results}
 
 @app.post("/api/audit/identify")
@@ -286,73 +261,43 @@ async def audit_identify(request: Request):
     file_path = data.get("file_path")
     if not file_path or not os.path.exists(file_path):
         return JSONResponse(status_code=404, content={"error": "File not found"})
-        
     settings = get_settings()
     api_key = settings.get("gemini_api_key")
-    if not api_key:
-        return JSONResponse(status_code=400, content={"error": "API Key missing"})
-        
+    if not api_key: return JSONResponse(status_code=400, content={"error": "API Key missing"})
     try:
-        with open(file_path, "rb") as f:
-            bytes_data = f.read(5000)
+        with open(file_path, "rb") as f: bytes_data = f.read(5000)
         encoding = detect_encoding(bytes_data) or 'utf-8'
         sample_text = bytes_data.decode(encoding, errors='ignore')
-        
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(settings.get("ai_model", "gemini-1.5-flash"))
-        
-        prompt = (
-            "Identify the language of the following subtitle text. "
-            "Return ONLY the ISO 639-1 language code (e.g. 'en', 'nl', 'fr', 'de', 'es').\n\n"
-            f"[TEXT]\n{sample_text[:1000]}"
-        )
+        prompt = "Identify the language of the following subtitle text. Return ONLY the ISO 639-1 language code (e.g. 'en', 'nl', 'fr').\n\n" + sample_text[:1000]
         res = model.generate_content(prompt)
         lang_code = res.text.strip().lower()
-        # Basic validation: should be 2 characters
         if len(lang_code) > 2:
-            # Try to find a 2-char code in the response
             match = re.search(r'\b([a-z]{2})\b', lang_code)
-            if match: lang_code = match.group(1)
-            else: lang_code = "unknown"
-            
+            lang_code = match.group(1) if match else "unknown"
         return {"language": lang_code}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    except Exception as e: return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/api/audit/rename")
 async def audit_rename(request: Request):
     data = await request.json()
-    file_path = data.get("file_path")
-    lang_code = data.get("language")
-    
+    file_path, lang_code = data.get("file_path"), data.get("language")
     if not file_path or not lang_code or not os.path.exists(file_path):
         return JSONResponse(status_code=400, content={"error": "Invalid request"})
-        
     new_path = file_path.replace(".srt", f".{lang_code}.srt")
     try:
         os.rename(file_path, new_path)
         return {"status": "success", "new_path": new_path}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    except Exception as e: return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/api/audit/list")
 async def audit_list():
     settings = get_settings()
     films_path = settings.get("films_path", "/Films")
     series_path = settings.get("series_path", "/Series")
-    target_lang = settings.get("target_language", "Dutch").lower()
-    
-    # Define tags to look for based on target language
-    lang_map = {
-        "dutch": [".nl.srt", ".dut.srt"],
-        "english": [".en.srt", ".eng.srt"],
-        "french": [".fr.srt", ".fre.srt", ".fra.srt"],
-        "german": [".de.srt", ".ger.srt", ".deu.srt"],
-        "spanish": [".es.srt", ".spa.srt"]
-    }
-    
-    # Fallback to .nl.srt if not in map, or use the map
-    valid_extensions = lang_map.get(target_lang, [".nl.srt"])
+    target_lang = settings.get("target_language", "Dutch")
+    variants = settings.get("target_language_variants", ["nl", "dut"])
     
     results = []
     for path in [films_path, series_path]:
@@ -360,13 +305,12 @@ async def audit_list():
             for root, dirs, files in os.walk(path):
                 for file in files:
                     file_lower = file.lower()
-                    if any(file_lower.endswith(ext) for ext in valid_extensions):
+                    if any(f".{v}." in file_lower or file_lower.endswith(f".{v}.srt") for v in variants):
                         full_path = os.path.join(root, file)
                         is_suspicious = detect_is_wrong_language(full_path, target_lang)
                         results.append({
-                            "name": file,
-                            "path": full_path,
-                            "rel_path": os.path.relpath(full_path, start=path),
+                            "name": file, "path": full_path, 
+                            "rel_path": os.path.relpath(full_path, start=path), 
                             "is_suspicious": is_suspicious
                         })
     return {"files": results}
@@ -374,9 +318,8 @@ async def audit_list():
 @app.post("/api/audit/delete_suspicious")
 async def audit_delete_suspicious(request: Request):
     data = await request.json()
-    paths = data.get("paths", [])
     deleted_count = 0
-    for p in paths:
+    for p in data.get("paths", []):
         if os.path.exists(p):
             os.remove(p)
             deleted_count += 1
@@ -384,36 +327,27 @@ async def audit_delete_suspicious(request: Request):
 
 @app.get("/api/audit/sample")
 async def audit_sample(file_path: str):
-    if not os.path.exists(file_path):
-        return JSONResponse(status_code=404, content={"error": "File not found"})
-    
+    if not os.path.exists(file_path): return JSONResponse(status_code=404, content={"error": "File not found"})
     try:
-        with open(file_path, "rb") as f:
-            bytes_data = f.read()
+        with open(file_path, "rb") as f: bytes_data = f.read()
         encoding = detect_encoding(bytes_data) or 'utf-8'
         content = bytes_data.decode(encoding, errors='ignore')
         parsed = parse_srt(content)
-        
         import random
-        # Get 10 random samples or all if less than 10
         sample_size = min(len(parsed), 10)
         samples = random.sample(parsed, sample_size)
         return {"samples": sorted(samples, key=lambda x: int(x['index']))}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    except Exception as e: return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/api/audit/delete")
 async def audit_delete(request: Request):
     data = await request.json()
     file_path = data.get("file_path")
-    if not file_path or not os.path.exists(file_path):
-        return JSONResponse(status_code=404, content={"error": "File not found"})
-    
+    if not file_path or not os.path.exists(file_path): return JSONResponse(status_code=404, content={"error": "File not found"})
     try:
         os.remove(file_path)
         return {"status": "deleted"}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    except Exception as e: return JSONResponse(status_code=500, content={"error": str(e)})
 
 # --- Serve Frontend SPA ---
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")

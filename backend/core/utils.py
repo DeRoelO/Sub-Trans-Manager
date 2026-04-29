@@ -2,14 +2,17 @@ import os
 import re
 import chardet
 
-DUTCH_VARIANTS = {'nl', 'dut', 'dutch', 'nld', 'ned'}
-
 def detect_encoding(file_byte: bytes) -> str:
     return chardet.detect(file_byte)['encoding']
 
-def is_dutch_variant(filename: str) -> bool:
+def is_target_language_file(filename: str) -> bool:
+    """Check if the filename indicates it is already in the target language."""
+    from core.config import get_settings
+    settings = get_settings()
+    variants = settings.get("target_language_variants", ["nl", "dut", "dutch", "nld", "ned"])
+    
     filename = filename.lower()
-    for variant in DUTCH_VARIANTS:
+    for variant in variants:
         # Check for .nl.srt, .nl.hi.srt, etc.
         if f".{variant}." in filename or filename.endswith(f".{variant}.srt"):
             return True
@@ -22,7 +25,6 @@ def detect_is_wrong_language(file_path: str, target_lang: str) -> bool:
         with open(file_path, "rb") as f:
             bytes_data = f.read(20000) # first 20KB for better accuracy
         
-        from core.translator import detect_encoding # Avoid circular import if possible, but it's already here
         encoding = detect_encoding(bytes_data) or 'utf-8'
         text = bytes_data.decode(encoding, errors='ignore').lower()
         
@@ -32,7 +34,8 @@ def detect_is_wrong_language(file_path: str, target_lang: str) -> bool:
             "dutch": {' de ', ' het ', ' een ', ' en ', ' van ', ' ik ', ' is ', ' dat ', ' op ', ' te ', ' met ', ' om '},
             "french": {' le ', ' la ', ' les ', ' et ', ' un ', ' une ', ' est ', ' dans ', ' que '},
             "german": {' der ', ' die ', ' das ', ' und ', ' ein ', ' eine ', ' ist ', ' met ', ' nicht '},
-            "spanish": {' el ', ' la ', ' los ', ' y ', ' en ', ' un ', ' una ', ' que ', ' con '}
+            "spanish": {' el ', ' la ', ' los ', ' y ', ' en ', ' un ', ' una ', ' que ', ' con '},
+            "italian": {' il ', ' lo ', ' la ', ' i ', ' gli ', ' le ', ' e ', ' un ', ' una ', ' che '}
         }
         
         target_words = lang_maps.get(target_lang.lower(), set())
@@ -42,7 +45,6 @@ def detect_is_wrong_language(file_path: str, target_lang: str) -> bool:
         target_score = sum(1 for w in target_words if w in text)
         
         # If English function words are significantly more frequent than target language, it's suspicious
-        # Note: 'en' is both Dutch and English, but usually 'the' vs 'de' is a better indicator.
         if en_score > target_score and en_score > 3:
             return True
     except:

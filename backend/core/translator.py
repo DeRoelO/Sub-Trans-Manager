@@ -2,9 +2,10 @@ import os
 import re
 import json
 import time
+from typing import List, Dict
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from core.utils import detect_encoding, verify_language_ai, is_dutch_variant
+from core.utils import detect_encoding, verify_language_ai, is_target_language_file
 
 def parse_srt(content: str) -> List[Dict[str, str]]:
     pattern = re.compile(r'(\d+)\s*\n(\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3})\s*\n((?:.|\n)*?)(?=\n\d+\s*\n|\Z)', re.MULTILINE)
@@ -37,14 +38,11 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
         force_msg = "" if attempt == 0 else "IMPORTANT: You previously failed or returned English. You MUST translate to the target language now! "
         
         prompt = (
-            f"{force_msg}Je bent een expert in het vertalen van film-script en ondertitels. "
-            f"Vertaal de 'text' velden in het JSON-object naar natuurlijk en informeel {target_language} (gebruik 'je/jij'). "
-            "Kijk naar de voorgaande en volgende regels in deze lijst om de context en flow van het gesprek te begrijpen. "
-            "BELANGRIJK: Voorkom letterlijke vertalingen die onnatuurlijk klinken. "
-            "Voorbeelden van hoe het MOET:\n"
-            "- 'one word of this' -> 'geen woord hierover' (NIET: 'een woord hiervan')\n"
-            "- 'You will never breathe...' -> 'Je zult nooit meer...' (zorg dat de zin natuurlijk loopt)\n"
-            "Zorg dat het id exact hetzelfde blijft. Output alleen de JSON.\n"
+            f"{force_msg}You are an expert movie and subtitle translator. "
+            f"Translate the 'text' fields in the JSON object to natural and informal {target_language}. "
+            "Use context from surrounding lines to ensure proper flow and tone. "
+            "IMPORTANT: Avoid literal translations that sound unnatural. "
+            "Ensure the 'id' remains identical. Output ONLY the JSON object.\n"
             f"[INPUT]\n{input_json}"
         )
         
@@ -83,33 +81,29 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
             if attempt < 1: 
                 time.sleep(2)
             else: 
-                print(f"Translation chunk failed after {attempt+1} attempts. Falling back to original text. Error: {e}")
+                print(f"Translation chunk failed after {attempt+1} attempts. Error: {e}")
                 return texts
 
 def translate_single_file(input_file: str, log_callback=None):
     if log_callback: log_callback(f"Starting translation for {input_file}")
     
     API_KEY = os.environ.get("GEMINI_API_KEY")
-    settings = None
+    from core.config import get_settings
+    settings = get_settings()
+    
     if not API_KEY:
-        from core.config import get_settings
-        settings = get_settings()
         API_KEY = settings.get("gemini_api_key")
         
     if not API_KEY:
-        msg = f"ERROR: GEMINI_API_KEY could not be found for {input_file}"
+        msg = f"ERROR: GEMINI_API_KEY missing for {input_file}"
         if log_callback: log_callback(msg)
-        print(msg)
         return False
-        
-    if not settings:
-        from core.config import get_settings
-        settings = get_settings()
 
     ai_model_name = settings.get("ai_model", "gemini-1.5-flash")
     target_language = settings.get("target_language", "Dutch")
+    target_lang_tag = settings.get("target_language_tag", "nl")
 
-    if log_callback: log_callback(f"[HANDMATIG] Using model: {ai_model_name}, Target: {target_language}")
+    if log_callback: log_callback(f"Model: {ai_model_name}, Target Language: {target_language} ({target_lang_tag})")
         
     genai.configure(api_key=API_KEY)
     model = genai.GenerativeModel(ai_model_name)
@@ -119,8 +113,7 @@ def translate_single_file(input_file: str, log_callback=None):
     content = bytes_data.decode(encoding, errors='ignore')
     
     parsed = parse_srt(content)
-    
-    if log_callback: log_callback(f"Parsed {len(parsed)} subtitle blocks. Beginning chunked translation.")
+    if log_callback: log_callback(f"Parsed {len(parsed)} blocks. Starting translation.")
     
     all_results = []
     chunks = chunk_text(parsed)
@@ -132,63 +125,43 @@ def translate_single_file(input_file: str, log_callback=None):
         time.sleep(1)
         
     flat_translations = [t for chunk in all_results for t in chunk]
-    
-    # Catch any length mismatch
-    if len(flat_translations) != len(parsed):
-        if log_callback: log_callback(f"WARNING: translation length mismatch! Expected {len(parsed)}, got {len(flat_translations)}.")
-        
     final_srt = "\n".join([f"{o['index']}\n{o['time']}\n{flat_translations[i] if i < len(flat_translations) else o['text']}\n" for i, o in enumerate(parsed)])
     
-    
-    # Generate output path
-    # Generic logic: if it's already tagged (e.g. .en.srt), replace that tag.
-    # If it's not tagged (e.g. .srt), append the .nl.srt tag.
-    # Use the target language from settings (default Dutch)
-    target_lang_code = "nl" if target_language.lower() == "dutch" else target_language.lower()[:2]
-    
-    # Try to replace existing language tag
-    output_path = re.sub(r'\.[a-z]{2,3}(\.[a-z]{2,8})?\.srt$', f'.{target_lang_code}.srt', input_file, flags=re.IGNORECASE)
+    # Generate output path using dynamic tag
+    output_path = re.sub(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', f'.{target_lang_tag}.srt', input_file, flags=re.IGNORECASE)
     if output_path == input_file: 
-        output_path = input_file.replace(".srt", f".{target_lang_code}.srt")
+        output_path = input_file.replace(".srt", f".{target_lang_tag}.srt")
         
-    # Save a backup of the original input file (the source .en.srt)
     try:
         import shutil
         shutil.copy2(input_file, input_file + ".bak")
         if log_callback: log_callback(f"Source backup created: {input_file}.bak")
-        
-        # ALSO backup existing .nl.srt if it exists before overwriting
         if os.path.exists(output_path):
             shutil.copy2(output_path, output_path + ".bak")
-            if log_callback: log_callback(f"Existing translation backup created: {output_path}.bak")
+            if log_callback: log_callback(f"Previous translation backup created.")
     except Exception as e:
-        if log_callback: log_callback(f"Warning: Failed to create backups: {e}")
+        if log_callback: log_callback(f"Warning: Backup failed: {e}")
 
     with open(output_path, 'w', encoding='utf-8') as f: 
         f.write(final_srt)
         
-    if log_callback: log_callback(f"Successfully saved translated file to {output_path}")
+    if log_callback: log_callback(f"File saved to {output_path}")
 
-    # VERIFICATION STEP
-    if log_callback: log_callback(f"Verifying translation quality for {target_language}...")
+    # VERIFICATION
+    if log_callback: log_callback(f"Verifying {target_language} quality...")
     is_valid = verify_language_ai(model, final_srt, target_language)
     if not is_valid:
-        if log_callback: log_callback(f"WARNING: Verification failed! The output might not be primarily in {target_language}.")
+        if log_callback: log_callback(f"WARNING: Verification failed. The output might not be primarily in {target_language}.")
     else:
         if log_callback: log_callback(f"Verification successful: File is in {target_language}.")
     
-    # Trigger Webhook
-    webhook = settings.get("jellyfin_webhook") if settings else None
+    webhook = settings.get("jellyfin_webhook")
     if webhook:
         try:
             import httpx
             httpx.post(webhook)
-            if log_callback: log_callback("Jellyfin webhook triggered successfully.")
+            if log_callback: log_callback("Webhook triggered.")
         except Exception as e:
-            if log_callback: log_callback(f"Failed to trigger webhook: {e}")
+            if log_callback: log_callback(f"Webhook failed: {e}")
 
     return True
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1: translate_single_file(sys.argv[1])

@@ -8,6 +8,8 @@ DEFAULT_SETTINGS = {
     "gemini_api_key": "",
     "ai_model": "gemini-2.0-flash",
     "target_language": "Dutch",
+    "target_language_tag": "nl",
+    "target_language_variants": ["nl", "dut", "dutch", "nld", "ned"],
     "films_path": "/Films",
     "series_path": "/Series",
     "batch_limit": 60,
@@ -15,6 +17,20 @@ DEFAULT_SETTINGS = {
     "cron_time": "02:00", # Specific time instead of full cron expr
     "jellyfin_webhook": ""
 }
+
+# Predefined languages for the frontend to pick from
+SUPPORTED_LANGUAGES = [
+    {"name": "Dutch", "tag": "nl", "variants": ["nl", "dut", "dutch", "nld", "ned"]},
+    {"name": "English", "tag": "en", "variants": ["en", "eng", "english"]},
+    {"name": "French", "tag": "fr", "variants": ["fr", "fre", "french", "fra"]},
+    {"name": "German", "tag": "de", "variants": ["de", "ger", "german", "deu"]},
+    {"name": "Spanish", "tag": "es", "variants": ["es", "spa", "spanish"]},
+    {"name": "Italian", "tag": "it", "variants": ["it", "ita", "italian"]},
+    {"name": "Portuguese", "tag": "pt", "variants": ["pt", "por", "portuguese"]},
+    {"name": "Swedish", "tag": "sv", "variants": ["sv", "swe", "swedish"]},
+    {"name": "Norwegian", "tag": "no", "variants": ["no", "nor", "norwegian"]},
+    {"name": "Danish", "tag": "da", "variants": ["da", "dan", "danish"]},
+]
 
 def ensure_config_dir():
     if not os.path.exists(CONFIG_DIR):

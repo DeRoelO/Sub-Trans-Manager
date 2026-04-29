@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { Play, Square, Save } from 'lucide-react'
+import { Play, Square, Save, Activity, ShieldCheck, Tag, Info } from 'lucide-react'
 
 const API_BASE = '/api'
 
 export default function SettingsPage() {
   const [config, setConfig] = useState({})
+  const [languages, setLanguages] = useState([])
   const [loading, setLoading] = useState(true)
   const [batchRunning, setBatchRunning] = useState(false)
   const [logs, setLogs] = useState([])
@@ -26,6 +27,7 @@ export default function SettingsPage() {
     fetchConfig()
     checkBatchStatus()
     fetchModels()
+    fetchLanguages()
 
     const eventSource = new EventSource(`${API_BASE}/logs`)
     eventSource.onmessage = (event) => {
@@ -55,6 +57,16 @@ export default function SettingsPage() {
     setLoading(false)
   }
 
+  const fetchLanguages = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/languages`)
+      const data = await res.json()
+      setLanguages(data.languages || [])
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
   const fetchModels = async () => {
     try {
       const res = await fetch(`${API_BASE}/models`)
@@ -65,6 +77,25 @@ export default function SettingsPage() {
     }
   }
 
+  const handleLanguageSelect = (langName) => {
+    const lang = languages.find(l => l.name === langName)
+    if (lang) {
+      setConfig(prev => ({
+        ...prev,
+        target_language: lang.name,
+        target_language_tag: lang.tag,
+        target_language_variants: lang.variants
+      }))
+    } else {
+      setConfig(prev => ({ ...prev, target_language: langName }))
+    }
+  }
+
+  const handleVariantsChange = (val) => {
+    const variants = val.split(',').map(v => v.trim()).filter(v => v)
+    setConfig(prev => ({ ...prev, target_language_variants: variants }))
+  }
+
   const runAuditScan = async () => {
     setLoading(true)
     try {
@@ -72,7 +103,7 @@ export default function SettingsPage() {
       const data = await res.json()
       setAuditFiles(data.files || [])
     } catch (err) {
-      alert("Scan mislukt")
+      alert("Scan failed")
     }
     setLoading(false)
   }
@@ -85,12 +116,12 @@ export default function SettingsPage() {
       const data = await res.json()
       setAuditSamples(data.samples || [])
     } catch (err) {
-      alert("Sample laden mislukt")
+      alert("Failed to load samples")
     }
   }
 
   const deleteAuditFile = async (path) => {
-    if (!window.confirm("Weet je zeker dat je deze vertaling wilt verwijderen?")) return
+    if (!window.confirm("Are you sure you want to delete this translation?")) return
     try {
       const res = await fetch(`${API_BASE}/audit/delete`, {
         method: 'POST',
@@ -103,17 +134,17 @@ export default function SettingsPage() {
         setAuditSamples([])
       }
     } catch (err) {
-      alert("Verwijderen mislukt")
+      alert("Deletion failed")
     }
   }
 
   const deleteSuspiciousFiles = async () => {
     const suspicious = auditFiles.filter(f => f.is_suspicious).map(f => f.path)
     if (suspicious.length === 0) {
-      alert("Geen verdachte bestanden gevonden.")
+      alert("No suspicious files found.")
       return
     }
-    if (!window.confirm(`Weet je zeker dat je alle ${suspicious.length} verdachte bestanden wilt verwijderen?`)) return
+    if (!window.confirm(`Are you sure you want to delete all ${suspicious.length} suspicious files?`)) return
     
     try {
       const res = await fetch(`${API_BASE}/audit/delete_suspicious`, {
@@ -125,10 +156,10 @@ export default function SettingsPage() {
         setAuditFiles(auditFiles.filter(f => !suspicious.includes(f.path)))
         setSelectedAuditFile(null)
         setAuditSamples([])
-        alert(`${suspicious.length} bestanden verwijderd.`)
+        alert(`${suspicious.length} files deleted.`)
       }
     } catch (err) {
-      alert("Bulk verwijderen mislukt")
+      alert("Bulk deletion failed")
     }
   }
 
@@ -139,7 +170,7 @@ export default function SettingsPage() {
       const data = await res.json()
       setUntaggedFiles(data.files || [])
     } catch (err) {
-      alert("Scan mislukt")
+      alert("Scan failed")
     }
     setLoading(false)
   }
@@ -156,12 +187,12 @@ export default function SettingsPage() {
       const lang = idData.language
       
       if (!lang || lang === 'unknown') {
-         alert("Taal kon niet worden vastgesteld.")
+         alert("Language could not be identified.")
          setIsIdentifying(false)
          return
       }
 
-      if (!window.confirm(`Gedetecteerde taal: ${lang.toUpperCase()}. Hernoemen naar .${lang}.srt?`)) {
+      if (!window.confirm(`Detected language: ${lang.toUpperCase()}. Rename to .${lang}.srt?`)) {
         setIsIdentifying(false)
         return
       }
@@ -174,10 +205,10 @@ export default function SettingsPage() {
       
       if (renRes.ok) {
         setUntaggedFiles(untaggedFiles.filter(f => f.path !== file.path))
-        alert("Succesvol hernoemd!")
+        alert("Successfully renamed!")
       }
     } catch (err) {
-      alert("Fout bij verwerken.")
+      alert("Error processing file.")
     }
     setIsIdentifying(false)
   }
@@ -209,17 +240,17 @@ export default function SettingsPage() {
         })
       })
       if (!resp.ok) {
-         alert("Fout bij opslaan!")
+         alert("Save failed!")
       } else {
-         alert("Instellingen succesvol opgeslagen!")
+         alert("Settings saved successfully!")
       }
     } catch (err) {
-      alert("Netwerkfout bij opslaan.")
+      alert("Network error while saving.")
     }
   }
 
   const testModel = async () => {
-    setTestResult("Bezig met verbinden...")
+    setTestResult("Connecting...")
     try {
       const resp = await fetch(`${API_BASE}/test_model`, {
         method: 'POST',
@@ -231,11 +262,11 @@ export default function SettingsPage() {
         setTestResult(data.result)
         setAvailableModels(data.models || [])
       } else {
-        setTestResult("Fout: " + (data.error || "Onbekende fout"))
+        setTestResult("Error: " + (data.error || "Unknown error"))
         if (data.models) setAvailableModels(data.models)
       }
     } catch (err) {
-      setTestResult("Netwerkfout tijdens verbinden.")
+      setTestResult("Network error during connection.")
     }
   }
 
@@ -249,12 +280,12 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading) return <div style={{ padding: '2rem' }}>Laden...</div>
+  if (loading) return <div style={{ padding: '4rem', textAlign: 'center' }}>Loading...</div>
 
   return (
-    <div className="flex-col gap-6">
+    <div className="flex-col gap-8">
       <div className="flex justify-between items-center">
-        <h2>Automatisering & Instellingen</h2>
+        <h2>System Configuration</h2>
       </div>
 
       <div className="flex gap-4">
@@ -262,20 +293,23 @@ export default function SettingsPage() {
           className={activeTab === 'general' ? '' : 'secondary'} 
           onClick={() => setActiveTab('general')}
         >
-          ⚙️ Algemene Instellingen
+          ⚙️ General Settings
         </button>
         <button 
           className={activeTab === 'audit' ? '' : 'secondary'} 
           onClick={() => setActiveTab('audit')}
         >
-          🔍 Subtitle Audit Tool
+          🔍 Subtitle Audit Tools
         </button>
       </div>
 
       {activeTab === 'general' ? (
         <div className="media-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <div className="glass-panel flex-col gap-6" style={{ padding: '2rem' }}>
-            <h3>Systeem Instellingen</h3>
+            <div className="flex items-center gap-2 mb-2">
+              <ShieldCheck size={20} className="text-muted" />
+              <h3>AI & Translation</h3>
+            </div>
             <form onSubmit={saveConfig}>
               <div className="form-group">
                 <label>Gemini API Key</label>
@@ -288,7 +322,7 @@ export default function SettingsPage() {
                     style={{ flex: 1 }}
                   />
                   <button type="button" onClick={testModel} className="secondary" style={{ whiteSpace: 'nowrap' }}>
-                    ⚡ Verbinding Maken
+                    Connect
                   </button>
                 </div>
               </div>
@@ -296,42 +330,84 @@ export default function SettingsPage() {
               {testResult && (
                 <div style={{ 
                   padding: '0.75rem', 
-                  background: testResult.includes('GELDIG') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', 
-                  border: `1px solid ${testResult.includes('GELDIG') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  background: testResult.includes('VALID') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', 
+                  border: `1px solid ${testResult.includes('VALID') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
                   borderRadius: '8px', 
                   marginBottom: '1rem', 
                   fontSize: '13px',
-                  color: testResult.includes('GELDIG') ? 'var(--success)' : 'var(--danger)'
+                  color: testResult.includes('VALID') ? 'var(--success)' : 'var(--danger)'
                 }}>
                   {testResult}
                 </div>
               )}
               
               <div className="form-group" style={{ opacity: availableModels.length > 0 ? 1 : 0.5 }}>
-                <label>AI Model Selectie</label>
+                <label>AI Model Selection</label>
                 <select 
                   value={config.ai_model || ''} 
                   onChange={(e) => handleConfigChange('ai_model', e.target.value)}
                   disabled={availableModels.length === 0}
                 >
-                  <option value="">-- Kies eerst Verbinding maken --</option>
+                  <option value="">-- Pick a model --</option>
                   {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
-                {availableModels.length === 0 && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>Klik eerst op 'Verbinding Maken' om modellen op te halen.</span>}
               </div>
 
               <div className="form-group">
-                <label>Doeltaal</label>
-                <input 
-                  type="text" 
-                  value={config.target_language || 'Dutch'} 
-                  onChange={(e) => handleConfigChange('target_language', e.target.value)}
-                  placeholder="Dutch"
-                />
+                <label>Target Language</label>
+                <select 
+                  value={config.target_language || ''} 
+                  onChange={(e) => handleLanguageSelect(e.target.value)}
+                >
+                  <option value="">Custom / Other</option>
+                  {languages.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}
+                </select>
+                {(!languages.find(l => l.name === config.target_language)) && (
+                   <input 
+                     type="text" 
+                     className="mt-2"
+                     value={config.target_language || ''} 
+                     onChange={(e) => handleConfigChange('target_language', e.target.value)}
+                     placeholder="Enter language name manually..."
+                   />
+                )}
               </div>
 
               <div className="form-group">
-                <label>Dagelijks Automatisch Starten Om:</label>
+                <div className="flex items-center gap-2">
+                  <Tag size={14} />
+                  <label style={{ margin: 0 }}>Language Tags & Variants</label>
+                </div>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={config.target_language_tag || ''} 
+                    onChange={(e) => handleConfigChange('target_language_tag', e.target.value)}
+                    placeholder="e.g. nl"
+                    style={{ width: '80px' }}
+                  />
+                  <input 
+                    type="text" 
+                    value={(config.target_language_variants || []).join(', ')} 
+                    onChange={(e) => handleVariantsChange(e.target.value)}
+                    placeholder="Variants (comma separated): nl, dut, dutch"
+                    style={{ flex: 1 }}
+                  />
+                </div>
+                <p className="text-muted" style={{ fontSize: '11px' }}>
+                  Used to detect existing translations and prevent redundant work.
+                </p>
+              </div>
+
+              <div className="divider" style={{ margin: '2rem 0', borderTop: '1px solid var(--card-border)' }} />
+
+              <div className="flex items-center gap-2 mb-4">
+                <Activity size={20} className="text-muted" />
+                <h3>Paths & Scheduler</h3>
+              </div>
+
+              <div className="form-group">
+                <label>Daily Auto-Start Time:</label>
                 <input 
                   type="time" 
                   value={config.cron_time || ''} 
@@ -339,59 +415,66 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="form-group">
-                 <label>Batch Limiet (aantal per run)</label>
-                 <input 
-                   type="number" 
-                   value={config.batch_limit || 60} 
-                   onChange={(e) => handleConfigChange('batch_limit', e.target.value)}
-                 />
+              <div className="media-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <div className="form-group">
+                   <label>Batch Limit</label>
+                   <input 
+                     type="number" 
+                     value={config.batch_limit || 60} 
+                     onChange={(e) => handleConfigChange('batch_limit', e.target.value)}
+                   />
+                </div>
+                <div className="form-group">
+                   <label>Delay (sec)</label>
+                   <input 
+                     type="number" 
+                     value={config.batch_delay || 60} 
+                     onChange={(e) => handleConfigChange('batch_delay', e.target.value)}
+                   />
+                </div>
               </div>
 
               <div className="form-group">
-                 <label>Delay (seconden wachten na vertaling)</label>
-                 <input 
-                   type="number" 
-                   value={config.batch_delay || 60} 
-                   onChange={(e) => handleConfigChange('batch_delay', e.target.value)}
-                 />
-              </div>
-
-              <div className="form-group">
-                <label>Jellyfin Webhook (Optioneel)</label>
+                <label>Jellyfin Webhook (Optional)</label>
                 <input 
                   type="text" 
                   value={config.jellyfin_webhook || ''} 
                   onChange={(e) => handleConfigChange('jellyfin_webhook', e.target.value)}
-                  placeholder="http://IP:8096/Library/Refresh?api_key=XYZ..."
+                  placeholder="http://IP:8096/Library/Refresh?api_key=..."
                 />
               </div>
 
-              <button type="submit" className="mt-4"><Save size={16} /> Opslaan in Config</button>
+              <button type="submit" className="mt-4 w-full"><Save size={16} /> Save Settings</button>
             </form>
           </div>
 
-          <div className="flex-col gap-4">
+          <div className="flex-col gap-6">
             <div className="glass-panel" style={{ padding: '2rem' }}>
               <div className="flex justify-between items-center mb-4">
-                <h3>Batch Job Controle</h3>
+                <div className="flex items-center gap-2">
+                  <Play size={20} className="text-muted" />
+                  <h3>Batch Job Control</h3>
+                </div>
                 {batchRunning ? (
-                  <button className="danger" onClick={toggleBatch}><Square size={16} /> Stop Batch</button>
+                  <button className="danger" onClick={toggleBatch}><Square size={16} /> Stop Job</button>
                 ) : (
-                  <button onClick={toggleBatch}><Play size={16} /> Start Nu</button>
+                  <button onClick={toggleBatch}><Play size={16} /> Start Now</button>
                 )}
               </div>
-              <p className="text-muted">
-                Start of stop handmatig de scan en vertaling van alle mappen conform quota en limits.
+              <p className="text-muted" style={{ fontSize: '14px' }}>
+                Manually start or stop the library scan and translation process.
               </p>
             </div>
 
             <div className="glass-panel" style={{ padding: '2rem', flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <h3 className="mb-4">Batch Logs</h3>
-              <div className="terminal" style={{ height: '400px' }}>
-                {logs.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>Wachten op input...</span> : null}
+              <div className="flex items-center gap-2 mb-4">
+                <Info size={20} className="text-muted" />
+                <h3>Recent Activity Logs</h3>
+              </div>
+              <div className="terminal" style={{ flex: 1, height: '440px' }}>
+                {logs.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>Waiting for activity...</span> : null}
                 {logs.map((log, idx) => (
-                  <div key={idx}>{log}</div>
+                  <div key={idx} style={{ marginBottom: '4px', borderLeft: '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px' }}>{log}</div>
                 ))}
                 <div ref={logEndRef} />
               </div>
@@ -409,14 +492,14 @@ export default function SettingsPage() {
                      onClick={() => setAuditSubTab('suspicious')}
                      style={{ fontSize: '12px', padding: '4px 12px' }}
                    >
-                     Mogelijk Foutieve Vertalingen
+                     Suspicious Translations
                    </button>
                    <button 
                      className={auditSubTab === 'untagged' ? 'secondary btn-small' : 'btn-small ghost'} 
                      onClick={() => setAuditSubTab('untagged')}
                      style={{ fontSize: '12px', padding: '4px 12px' }}
                    >
-                     Hernoem Naamloze Subtitles
+                     Identify Untagged Files
                    </button>
                 </div>
               </div>
@@ -424,12 +507,12 @@ export default function SettingsPage() {
                 {auditSubTab === 'suspicious' ? (
                   <>
                     {auditFiles.some(f => f.is_suspicious) && (
-                       <button className="danger" onClick={deleteSuspiciousFiles}>🗑️ Verwijder alle {auditFiles.filter(f => f.is_suspicious).length} verdachte</button>
+                       <button className="danger" onClick={deleteSuspiciousFiles}>🗑️ Delete All {auditFiles.filter(f => f.is_suspicious).length} Suspicious</button>
                     )}
-                    <button onClick={runAuditScan}>⚡ Scan op fouten</button>
+                    <button onClick={runAuditScan}>⚡ Scan for Errors</button>
                   </>
                 ) : (
-                  <button onClick={runUntaggedScan}>⚡ Scan op naamloze</button>
+                  <button onClick={runUntaggedScan}>⚡ Scan Untagged</button>
                 )}
               </div>
             </div>
@@ -438,7 +521,7 @@ export default function SettingsPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
                 <div className="glass-panel" style={{ maxHeight: '600px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)' }}>
                   {auditFiles.length === 0 ? (
-                    <div style={{ padding: '2rem', textAlign: 'center' }}>Geen bestanden gevonden. Start een scan.</div>
+                    <div style={{ padding: '2rem', textAlign: 'center' }}>No files found. Run a scan to begin.</div>
                   ) : (
                     auditFiles.map((file, i) => (
                       <div 
@@ -448,7 +531,7 @@ export default function SettingsPage() {
                           padding: '1rem', 
                           borderBottom: '1px solid var(--card-border)', 
                           cursor: 'pointer',
-                          background: selectedAuditFile?.path === file.path ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
+                          background: selectedAuditFile?.path === file.path ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center'
@@ -460,7 +543,7 @@ export default function SettingsPage() {
                         </div>
                         {file.is_suspicious && (
                           <div style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
-                            ⚠️ VERDACHT
+                            ⚠️ SUSPICIOUS
                           </div>
                         )}
                       </div>
@@ -472,21 +555,21 @@ export default function SettingsPage() {
                   {selectedAuditFile ? (
                     <div className="flex-col gap-4">
                       <div className="flex justify-between items-start">
-                        <h4>Steekproef (10 willekeurige regels)</h4>
-                        <button className="danger" onClick={() => deleteAuditFile(selectedAuditFile.path)}>🗑️ Verwijder & Her-vertaal</button>
+                        <h4>Random Sample (10 lines)</h4>
+                        <button className="danger" onClick={() => deleteAuditFile(selectedAuditFile.path)}>🗑️ Delete & Re-translate</button>
                       </div>
-                      <div className="terminal" style={{ height: '480px', background: 'rgba(0,0,0,0.4)', padding: '1rem', fontSize: '13px', color: '#f8fafc' }}>
+                      <div className="terminal" style={{ height: '480px', background: 'rgba(0,0,0,0.4)', padding: '1.2rem', fontSize: '13px', color: '#f8fafc' }}>
                         {auditSamples.length > 0 ? auditSamples.map((s, i) => (
-                          <div key={i} style={{ marginBottom: '1rem' }}>
-                            <div style={{ color: 'var(--accent)', fontSize: '11px' }}>#{s.index} - {s.time}</div>
+                          <div key={i} style={{ marginBottom: '1.2rem' }}>
+                            <div style={{ color: 'var(--accent)', fontSize: '11px', marginBottom: '4px' }}>#{s.index} — {s.time}</div>
                             <div>{s.text}</div>
                           </div>
-                        )) : "Bezig met laden..."}
+                        )) : "Loading sample..."}
                       </div>
                     </div>
                   ) : (
                     <div style={{ height: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                      Selecteer een bestand om te controleren.
+                      Select a file to inspect content.
                     </div>
                   )}
                 </div>
@@ -494,19 +577,19 @@ export default function SettingsPage() {
             ) : (
               <div className="flex-col gap-4">
                  <p className="text-muted" style={{ fontSize: '14px' }}>
-                   Sommige bestanden hebben geen taal-extensie (bijv. <code>film.srt</code> in plaats van <code>film.en.srt</code>). 
-                   Gebruik deze tool om de taal te raden en het bestand correct te hernoemen.
+                   Files lacking language tags (e.g., <code>movie.srt</code> instead of <code>movie.en.srt</code>). 
+                   Use this tool to identify the language using AI and rename the file correctly.
                  </p>
                  <div className="glass-panel" style={{ maxHeight: '600px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)' }}>
                    {untaggedFiles.length === 0 ? (
-                     <div style={{ padding: '2rem', textAlign: 'center' }}>Geen naamloze bestanden gevonden. Start een scan.</div>
+                     <div style={{ padding: '2rem', textAlign: 'center' }}>No untagged files found. Run a scan.</div>
                    ) : (
                      <table className="w-full" style={{ borderCollapse: 'collapse' }}>
                        <thead>
                          <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--card-border)' }}>
-                           <th style={{ padding: '1rem' }}>Bestandsnaam</th>
-                           <th style={{ padding: '1rem' }}>Map</th>
-                           <th style={{ padding: '1rem' }}>Actie</th>
+                           <th style={{ padding: '1rem' }}>Filename</th>
+                           <th style={{ padding: '1rem' }}>Folder</th>
+                           <th style={{ padding: '1rem' }}>Action</th>
                          </tr>
                        </thead>
                        <tbody>
@@ -520,7 +603,7 @@ export default function SettingsPage() {
                                  disabled={isIdentifying === file.path}
                                  onClick={() => identifyAndRename(file)}
                                >
-                                 {isIdentifying === file.path ? 'Bezig...' : 'Taal Detecteren'}
+                                 {isIdentifying === file.path ? 'Identifying...' : 'Detect Language'}
                                </button>
                              </td>
                            </tr>
