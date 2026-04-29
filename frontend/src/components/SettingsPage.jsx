@@ -415,6 +415,25 @@ export default function SettingsPage() {
                 />
               </div>
 
+              <div className="flex-col gap-2 mb-6">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={config.auto_identify_untagged} 
+                    onChange={(e) => handleConfigChange('auto_identify_untagged', e.target.checked)}
+                  />
+                  <span>Auto-identify language for untagged files (.srt)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={config.auto_cleanup_suspicious} 
+                    onChange={(e) => handleConfigChange('auto_cleanup_suspicious', e.target.checked)}
+                  />
+                  <span>Auto-delete suspicious translations (experimental)</span>
+                </label>
+              </div>
+
               <div className="media-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
                 <div className="form-group">
                    <label>Batch Limit</label>

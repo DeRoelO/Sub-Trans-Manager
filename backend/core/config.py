@@ -14,8 +14,10 @@ DEFAULT_SETTINGS = {
     "series_path": "/Series",
     "batch_limit": 60,
     "batch_delay": 60,
-    "cron_time": "02:00", # Specific time instead of full cron expr
-    "jellyfin_webhook": ""
+    "cron_time": "02:00",
+    "jellyfin_webhook": "",
+    "auto_cleanup_suspicious": false,
+    "auto_identify_untagged": true
 }
 
 # Predefined languages for the frontend to pick from
