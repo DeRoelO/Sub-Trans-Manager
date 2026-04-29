@@ -4,7 +4,7 @@ import time
 import asyncio
 from datetime import datetime
 from core.config import get_settings
-from core.utils import is_target_language_file, detect_is_wrong_language, detect_encoding
+from core.utils import is_target_language_file, detect_is_wrong_language, detect_encoding, heuristic_detect_language
 
 # Simple in-memory flag for stopping batch gracefully
 _BATCH_IS_RUNNING = False
@@ -35,14 +35,11 @@ def stop_batch_job():
         append_log("🔴 STOP signal sent. Terminating after current item.")
 
 async def identify_untagged_files(log_callback=None):
-    from core.config import get_settings
-    import google.generativeai as genai
+    """Heuristic identification (FREE - No API calls)."""
     settings = get_settings()
-    api_key = settings.get('gemini_api_key')
-    if not api_key: return
-
     films_path = settings.get('films_path', '/Films')
     series_path = settings.get('series_path', '/Series')
+    
     untagged = []
     for path in [films_path, series_path]:
         if os.path.exists(path):
@@ -53,27 +50,26 @@ async def identify_untagged_files(log_callback=None):
 
     if not untagged: return
 
-    if log_callback: log_callback(f"🔍 Found {len(untagged)} untagged files. Identifying...")
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(settings.get('ai_model', 'gemini-1.5-flash'))
+    if log_callback: log_callback(f"🔍 Analyzing {len(untagged)} untagged files using heuristics...")
 
+    success_count = 0
     for file_path in untagged:
         if not _BATCH_IS_RUNNING: break
         try:
-            with open(file_path, 'rb') as f: bytes_data = f.read(5000)
+            with open(file_path, 'rb') as f: bytes_data = f.read(15000)
             encoding = detect_encoding(bytes_data) or 'utf-8'
-            sample_text = bytes_data.decode(encoding, errors='ignore')
-            prompt = 'Identify the language of this subtitle text. Return ONLY the ISO 639-1 code (e.g. en, nl).\n\n' + sample_text[:1000]
-            res = model.generate_content(prompt)
-            lang_code = res.text.strip().lower()
-            match = re.search(r'\b([a-z]{2})\b', lang_code)
-            lang_code = match.group(1) if match else None
-            if lang_code:
+            text = bytes_data.decode(encoding, errors='ignore')
+            
+            lang_code = heuristic_detect_language(text)
+            if lang_code != "unknown":
                 new_path = file_path.replace('.srt', f'.{lang_code}.srt')
                 os.rename(file_path, new_path)
-                if log_callback: log_callback(f"🏷️ Renamed: {os.path.basename(file_path)} -> .{lang_code}.srt")
-            await asyncio.sleep(0.5)
+                success_count += 1
+                if log_callback: log_callback(f"🏷️ Identified: {os.path.basename(file_path)} -> .{lang_code}.srt")
         except: pass
+
+    if success_count > 0 and log_callback:
+        log_callback(f"✅ Successfully identified {success_count} files.")
 
 async def cleanup_suspicious_files(log_callback=None):
     settings = get_settings()
@@ -94,7 +90,7 @@ async def cleanup_suspicious_files(log_callback=None):
                         if detect_is_wrong_language(full_path, target_lang):
                             os.remove(full_path)
                             count += 1
-                            if log_callback: log_callback(f"🗑️ Deleted suspicious file: {file}")
+                            if log_callback: log_callback(f"🗑️ Deleted suspicious translation: {file}")
     if count > 0 and log_callback:
         log_callback(f"🧹 Cleaned up {count} suspicious translations.")
 
@@ -114,11 +110,11 @@ async def start_batch_job():
     target_tag = settings.get("target_language_tag", "nl")
     
     try:
-        # Step 1: Identify Untagged (if enabled)
+        # Step 1: Identify Untagged (Heuristic - Free)
         if settings.get("auto_identify_untagged", True):
             await identify_untagged_files(log_callback=append_log)
 
-        # Step 2: Cleanup Suspicious (if enabled)
+        # Step 2: Cleanup Suspicious (Heuristic - Free)
         if settings.get("auto_cleanup_suspicious", False):
             await cleanup_suspicious_files(log_callback=append_log)
 
@@ -175,7 +171,6 @@ async def get_log_generator(request):
         await asyncio.sleep(1)
 
 async def bulk_rename_untagged_task(log_callback=None):
-    """Entry point for manual UI trigger"""
     global _BATCH_IS_RUNNING
     if _BATCH_IS_RUNNING: return
     _BATCH_IS_RUNNING = True
