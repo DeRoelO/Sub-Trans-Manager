@@ -8,13 +8,14 @@ from google.api_core import exceptions
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from core.utils import detect_encoding, verify_language_ai, is_target_language_file
 
-# Session tracking for success rate
-_TOTAL_CALLS = 0
-_SUCCESSFUL_CALLS = 0
+from collections import deque
+
+# Session tracking for success rate (sliding window of last 50 calls)
+_CALL_HISTORY = deque(maxlen=50)
 
 def get_success_rate():
-    if _TOTAL_CALLS == 0: return 1.0
-    return _SUCCESSFUL_CALLS / _TOTAL_CALLS
+    if not _CALL_HISTORY: return 1.0
+    return sum(1 for x in _CALL_HISTORY if x) / len(_CALL_HISTORY)
 
 def parse_srt(content: str) -> List[Dict[str, str]]:
     pattern = re.compile(r'(\d+)\s*\n(\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3})\s*\n((?:.|\n)*?)(?=\n\d+\s*\n|\Z)', re.MULTILINE)
@@ -33,7 +34,6 @@ def chunk_text(parsed_data: List[Dict[str, str]], chunk_size: int = 2000) -> Lis
     return chunks
 
 def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
-    global _TOTAL_CALLS, _SUCCESSFUL_CALLS
     input_json = json.dumps({"items": [{"id": i, "text": t} for i, t in enumerate(texts)]}, ensure_ascii=False)
     
     safety = { 
@@ -42,8 +42,6 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
         HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE, 
         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE 
     }
-    
-    _TOTAL_CALLS += 1
     
     for attempt in range(3): # Increased attempts for retry logic
         try:
@@ -79,7 +77,7 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
             if identical_count > (len(texts) * 0.8) and len(texts) > 2:
                 raise ValueError("Source text returned")
 
-            _SUCCESSFUL_CALLS += 1
+            _CALL_HISTORY.append(True)
             return results
 
         except exceptions.ServiceUnavailable:
@@ -90,7 +88,9 @@ def translate_chunk(model, texts: List[str], target_language: str) -> List[str]:
         except Exception as e:
             print(f"⚠️ Chunk translation error (Attempt {attempt+1}): {e}")
             if attempt < 2: time.sleep(2)
-            else: return texts
+            else: 
+                _CALL_HISTORY.append(False)
+                return texts
 
 def translate_single_file(input_file: str, log_callback=None):
     if log_callback: log_callback(f"Starting translation for {input_file}")
@@ -117,14 +117,12 @@ def translate_single_file(input_file: str, log_callback=None):
     total_chunks = len(chunks)
     
     for idx, chunk in enumerate(chunks):
-        # Check Success Rate
+        # Check Success Rate (only after we have at least 10 calls to avoid early spikes)
         rate = get_success_rate()
-        if _TOTAL_CALLS > 10 and rate < 0.90:
+        if len(_CALL_HISTORY) >= 10 and rate < 0.90:
             if log_callback: log_callback(f"⛔ Success rate dropped to {rate:.1%}. Pausing for 1 hour...")
             time.sleep(3600)
-            # Reset stats after pause? Or keep them? Let's reset to allow a fresh start
-            global _TOTAL_CALLS, _SUCCESSFUL_CALLS
-            _TOTAL_CALLS = 0; _SUCCESSFUL_CALLS = 0
+            _CALL_HISTORY.clear()
 
         res = translate_chunk(model, [item['text'] for item in chunk], target_language)
         all_results.append(res)
