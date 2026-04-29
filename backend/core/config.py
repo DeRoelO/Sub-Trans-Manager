@@ -16,8 +16,8 @@ DEFAULT_SETTINGS = {
     "batch_delay": 60,
     "cron_time": "02:00",
     "jellyfin_webhook": "",
-    "auto_cleanup_suspicious": false,
-    "auto_identify_untagged": true
+    "auto_cleanup_suspicious": False,
+    "auto_identify_untagged": True
 }
 
 # Predefined languages for the frontend to pick from
