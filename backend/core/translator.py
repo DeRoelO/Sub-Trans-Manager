@@ -2,13 +2,9 @@ import os
 import re
 import json
 import time
-import chardet
-from typing import List, Dict, Any
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-
-def detect_encoding(file_byte: bytes) -> str:
-    return chardet.detect(file_byte)['encoding']
+from core.utils import detect_encoding, verify_language_ai, is_dutch_variant
 
 def parse_srt(content: str) -> List[Dict[str, str]]:
     pattern = re.compile(r'(\d+)\s*\n(\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3})\s*\n((?:.|\n)*?)(?=\n\d+\s*\n|\Z)', re.MULTILINE)
@@ -144,9 +140,16 @@ def translate_single_file(input_file: str, log_callback=None):
     final_srt = "\n".join([f"{o['index']}\n{o['time']}\n{flat_translations[i] if i < len(flat_translations) else o['text']}\n" for i, o in enumerate(parsed)])
     
     
-    output_path = re.sub(r'\.(en|eng|hi|en\.hi|eng\.hi)\.srt$', '.nl.srt', input_file, flags=re.IGNORECASE)
+    # Generate output path
+    # Generic logic: if it's already tagged (e.g. .en.srt), replace that tag.
+    # If it's not tagged (e.g. .srt), append the .nl.srt tag.
+    # Use the target language from settings (default Dutch)
+    target_lang_code = "nl" if target_language.lower() == "dutch" else target_language.lower()[:2]
+    
+    # Try to replace existing language tag
+    output_path = re.sub(r'\.[a-z]{2,3}(\.[a-z]{2,8})?\.srt$', f'.{target_lang_code}.srt', input_file, flags=re.IGNORECASE)
     if output_path == input_file: 
-        output_path = input_file.replace(".srt", ".nl.srt")
+        output_path = input_file.replace(".srt", f".{target_lang_code}.srt")
         
     # Save a backup of the original input file (the source .en.srt)
     try:
@@ -165,6 +168,14 @@ def translate_single_file(input_file: str, log_callback=None):
         f.write(final_srt)
         
     if log_callback: log_callback(f"Successfully saved translated file to {output_path}")
+
+    # VERIFICATION STEP
+    if log_callback: log_callback(f"Verifying translation quality for {target_language}...")
+    is_valid = verify_language_ai(model, final_srt, target_language)
+    if not is_valid:
+        if log_callback: log_callback(f"WARNING: Verification failed! The output might not be primarily in {target_language}.")
+    else:
+        if log_callback: log_callback(f"Verification successful: File is in {target_language}.")
     
     # Trigger Webhook
     webhook = settings.get("jellyfin_webhook") if settings else None

@@ -15,7 +15,10 @@ export default function SettingsPage() {
   const [auditFiles, setAuditFiles] = useState([])
   const [auditSamples, setAuditSamples] = useState([])
   const [selectedAuditFile, setSelectedAuditFile] = useState(null)
+  const [untaggedFiles, setUntaggedFiles] = useState([])
+  const [isIdentifying, setIsIdentifying] = useState(false)
   const [activeTab, setActiveTab] = useState('general') // 'general' or 'audit'
+  const [auditSubTab, setAuditSubTab] = useState('suspicious') // 'suspicious' or 'untagged'
   
   const logEndRef = useRef(null)
 
@@ -127,6 +130,56 @@ export default function SettingsPage() {
     } catch (err) {
       alert("Bulk verwijderen mislukt")
     }
+  }
+
+  const runUntaggedScan = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/audit/untagged`)
+      const data = await res.json()
+      setUntaggedFiles(data.files || [])
+    } catch (err) {
+      alert("Scan mislukt")
+    }
+    setLoading(false)
+  }
+
+  const identifyAndRename = async (file) => {
+    setIsIdentifying(file.path)
+    try {
+      const idRes = await fetch(`${API_BASE}/audit/identify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: file.path })
+      })
+      const idData = await idRes.json()
+      const lang = idData.language
+      
+      if (!lang || lang === 'unknown') {
+         alert("Taal kon niet worden vastgesteld.")
+         setIsIdentifying(false)
+         return
+      }
+
+      if (!window.confirm(`Gedetecteerde taal: ${lang.toUpperCase()}. Hernoemen naar .${lang}.srt?`)) {
+        setIsIdentifying(false)
+        return
+      }
+
+      const renRes = await fetch(`${API_BASE}/audit/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: file.path, language: lang })
+      })
+      
+      if (renRes.ok) {
+        setUntaggedFiles(untaggedFiles.filter(f => f.path !== file.path))
+        alert("Succesvol hernoemd!")
+      }
+    } catch (err) {
+      alert("Fout bij verwerken.")
+    }
+    setIsIdentifying(false)
   }
 
   const checkBatchStatus = async () => {
@@ -348,74 +401,136 @@ export default function SettingsPage() {
       ) : (
         <div className="glass-panel" style={{ padding: '2rem' }}>
             <div className="flex justify-between items-center mb-6">
-              <div>
-                <h3>Subtitle Audit Tool</h3>
-                <p className="text-muted">Scan je Bibliotheek op vertalingen die verdacht veel op Engels lijken.</p>
+              <div className="flex-col gap-1">
+                <h3>Subtitle Audit Tools</h3>
+                <div className="flex gap-4 mt-2">
+                   <button 
+                     className={auditSubTab === 'suspicious' ? 'secondary btn-small' : 'btn-small ghost'} 
+                     onClick={() => setAuditSubTab('suspicious')}
+                     style={{ fontSize: '12px', padding: '4px 12px' }}
+                   >
+                     Mogelijk Foutieve Vertalingen
+                   </button>
+                   <button 
+                     className={auditSubTab === 'untagged' ? 'secondary btn-small' : 'btn-small ghost'} 
+                     onClick={() => setAuditSubTab('untagged')}
+                     style={{ fontSize: '12px', padding: '4px 12px' }}
+                   >
+                     Hernoem Naamloze Subtitles
+                   </button>
+                </div>
               </div>
               <div className="flex gap-2">
-                {auditFiles.some(f => f.is_suspicious) && (
-                   <button className="danger" onClick={deleteSuspiciousFiles}>🗑️ Verwijder alle {auditFiles.filter(f => f.is_suspicious).length} verdachte</button>
-                )}
-                <button onClick={runAuditScan}>⚡ Scan Bibliotheek</button>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-              <div className="glass-panel" style={{ maxHeight: '600px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)' }}>
-                {auditFiles.length === 0 ? (
-                  <div style={{ padding: '2rem', textAlign: 'center' }}>Geen bestanden gevonden. Start een scan.</div>
+                {auditSubTab === 'suspicious' ? (
+                  <>
+                    {auditFiles.some(f => f.is_suspicious) && (
+                       <button className="danger" onClick={deleteSuspiciousFiles}>🗑️ Verwijder alle {auditFiles.filter(f => f.is_suspicious).length} verdachte</button>
+                    )}
+                    <button onClick={runAuditScan}>⚡ Scan op fouten</button>
+                  </>
                 ) : (
-                  auditFiles.map((file, i) => (
-                    <div 
-                      key={i} 
-                      onClick={() => loadAuditSample(file)}
-                      style={{ 
-                        padding: '1rem', 
-                        borderBottom: '1px solid var(--card-border)', 
-                        cursor: 'pointer',
-                        background: selectedAuditFile?.path === file.path ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontSize: '14px', fontWeight: '500' }}>{file.name}</div>
-                        <div className="text-muted" style={{ fontSize: '11px' }}>{file.rel_path}</div>
-                      </div>
-                      {file.is_suspicious && (
-                        <div style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
-                          ⚠️ VERDACHT
-                        </div>
-                      )}
-                    </div>
-                  ))
+                  <button onClick={runUntaggedScan}>⚡ Scan op naamloze</button>
                 )}
               </div>
-
-            <div className="glass-panel" style={{ padding: '1.5rem', background: 'rgba(0,0,0,0.2)' }}>
-              {selectedAuditFile ? (
-                <div className="flex-col gap-4">
-                  <div className="flex justify-between items-start">
-                    <h4>Steekproef (10 willekeurige regels)</h4>
-                    <button className="danger" onClick={() => deleteAuditFile(selectedAuditFile.path)}>🗑️ Verwijder & Her-vertaal</button>
-                  </div>
-                  <div className="terminal" style={{ height: '480px', background: 'rgba(0,0,0,0.4)', padding: '1rem', fontSize: '13px', color: '#f8fafc' }}>
-                    {auditSamples.length > 0 ? auditSamples.map((s, i) => (
-                      <div key={i} style={{ marginBottom: '1rem' }}>
-                        <div style={{ color: 'var(--accent)', fontSize: '11px' }}>#{s.index} - {s.time}</div>
-                        <div>{s.text}</div>
-                      </div>
-                    )) : "Bezig met laden..."}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ height: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                  Selecteer een bestand om te controleren.
-                </div>
-              )}
             </div>
-          </div>
+
+            {auditSubTab === 'suspicious' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                <div className="glass-panel" style={{ maxHeight: '600px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)' }}>
+                  {auditFiles.length === 0 ? (
+                    <div style={{ padding: '2rem', textAlign: 'center' }}>Geen bestanden gevonden. Start een scan.</div>
+                  ) : (
+                    auditFiles.map((file, i) => (
+                      <div 
+                        key={i} 
+                        onClick={() => loadAuditSample(file)}
+                        style={{ 
+                          padding: '1rem', 
+                          borderBottom: '1px solid var(--card-border)', 
+                          cursor: 'pointer',
+                          background: selectedAuditFile?.path === file.path ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '14px', fontWeight: '500' }}>{file.name}</div>
+                          <div className="text-muted" style={{ fontSize: '11px' }}>{file.rel_path}</div>
+                        </div>
+                        {file.is_suspicious && (
+                          <div style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                            ⚠️ VERDACHT
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="glass-panel" style={{ padding: '1.5rem', background: 'rgba(0,0,0,0.2)' }}>
+                  {selectedAuditFile ? (
+                    <div className="flex-col gap-4">
+                      <div className="flex justify-between items-start">
+                        <h4>Steekproef (10 willekeurige regels)</h4>
+                        <button className="danger" onClick={() => deleteAuditFile(selectedAuditFile.path)}>🗑️ Verwijder & Her-vertaal</button>
+                      </div>
+                      <div className="terminal" style={{ height: '480px', background: 'rgba(0,0,0,0.4)', padding: '1rem', fontSize: '13px', color: '#f8fafc' }}>
+                        {auditSamples.length > 0 ? auditSamples.map((s, i) => (
+                          <div key={i} style={{ marginBottom: '1rem' }}>
+                            <div style={{ color: 'var(--accent)', fontSize: '11px' }}>#{s.index} - {s.time}</div>
+                            <div>{s.text}</div>
+                          </div>
+                        )) : "Bezig met laden..."}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ height: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                      Selecteer een bestand om te controleren.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-col gap-4">
+                 <p className="text-muted" style={{ fontSize: '14px' }}>
+                   Sommige bestanden hebben geen taal-extensie (bijv. <code>film.srt</code> in plaats van <code>film.en.srt</code>). 
+                   Gebruik deze tool om de taal te raden en het bestand correct te hernoemen.
+                 </p>
+                 <div className="glass-panel" style={{ maxHeight: '600px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)' }}>
+                   {untaggedFiles.length === 0 ? (
+                     <div style={{ padding: '2rem', textAlign: 'center' }}>Geen naamloze bestanden gevonden. Start een scan.</div>
+                   ) : (
+                     <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+                       <thead>
+                         <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--card-border)' }}>
+                           <th style={{ padding: '1rem' }}>Bestandsnaam</th>
+                           <th style={{ padding: '1rem' }}>Map</th>
+                           <th style={{ padding: '1rem' }}>Actie</th>
+                         </tr>
+                       </thead>
+                       <tbody>
+                         {untaggedFiles.map((file, i) => (
+                           <tr key={i} style={{ borderBottom: '1px solid var(--card-border)' }}>
+                             <td style={{ padding: '1rem', fontSize: '14px' }}>{file.name}</td>
+                             <td style={{ padding: '1rem', fontSize: '12px' }} className="text-muted">{file.rel_path}</td>
+                             <td style={{ padding: '1rem' }}>
+                               <button 
+                                 className="secondary btn-small" 
+                                 disabled={isIdentifying === file.path}
+                                 onClick={() => identifyAndRename(file)}
+                               >
+                                 {isIdentifying === file.path ? 'Bezig...' : 'Taal Detecteren'}
+                               </button>
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   )}
+                 </div>
+              </div>
+            )}
         </div>
       )}
     </div>

@@ -17,7 +17,7 @@ WORKDIR /app
 # Expose PUID and PGID variables
 ENV PUID=33
 ENV PGID=33
-ENV CONFIG_PATH=/SSD-DATA/mediastack/config/translator
+ENV CONFIG_PATH=/app/config
 
 # Install dependencies required for system + python
 RUN apt-get update && apt-get install -y \

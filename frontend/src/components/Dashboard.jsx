@@ -74,7 +74,7 @@ export default function Dashboard() {
       </div>
       
       <div className="flex gap-2">
-        {item.has_en ? <span className="badge en">EN</span> : <span className="badge none">Geen EN</span>}
+        {item.has_en ? <span className="badge en">BRON</span> : <span className="badge none">Geen Bron</span>}
         {item.has_nl ? <span className="badge nl">NL</span> : <span className="badge none">Geen NL</span>}
         {item.has_bak && <span className="badge" style={{ background: '#795548', color: 'white' }}>BAK</span>}
       </div>

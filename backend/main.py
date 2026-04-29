@@ -11,6 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 from core.translator import translate_single_file, parse_srt, detect_encoding
 from core.batch import start_batch_job, stop_batch_job, get_batch_status, get_log_generator
 from core.config import get_settings, update_settings
+from core.utils import is_dutch_variant, detect_is_wrong_language
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -56,26 +57,28 @@ def list_media():
     for path, kind in [(films_path, "film"), (series_path, "series")]:
         if os.path.exists(path):
             for root, dirs, files in os.walk(path):
-                # Search for any subtitle files representing an episode/movie
                 for file in files:
                     file_lower = file.lower()
                     if file_lower.endswith(".srt"):
-                        # Improved regex to handle multiple tags: e.g. .en.srt, .en.hi.srt, .nl.hi.srt
-                        # It matches .[lang].srt AND .[lang].[hi/sdh/forced].srt
-                        base_name_match = re.sub(r'\.(en|eng|hi|nl|dut|sdh|forced|en\.hi|eng\.hi|nl\.hi|dut\.hi)(\.(hi|sdh|forced))?\.srt$', '', file, flags=re.IGNORECASE)
+                        # Extract base name by removing .srt and any language/modifier tags
+                        # This regex matches .[lang].srt, .[lang].[hi/sdh/forced].srt, etc.
+                        # We use a broad match for the language tag unless it's Dutch
+                        
+                        # Step 1: Detect if it's Dutch
+                        is_nl = is_dutch_variant(file)
+                        
+                        # Step 2: Try to extract a base name
+                        # We look for the LAST occurrence of a language-like tag
+                        base_name_match = re.sub(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', '', file, flags=re.IGNORECASE)
                         if base_name_match == file:
                             base_name_match = file.replace(".srt", "")
                             
                         full_base_path = os.path.join(root, base_name_match)
                         
-                        # Find if we already registered this episode/video
                         existing = next((m for m in media if m["base_path"] == full_base_path), None)
                         if not existing:
-                            # Parse out directory path context for neat display
                             rel_path = os.path.relpath(root, start=path)
-                            
                             if kind == "series" and rel_path != ".":
-                                # For series, use the top-level folder name as the group
                                 display_dir = rel_path.split(os.sep)[0]
                             else:
                                 display_dir = rel_path if rel_path != "." else os.path.basename(root)
@@ -86,7 +89,7 @@ def list_media():
                                 "group": display_dir, 
                                 "subpath": rel_path if rel_path != display_dir else "",
                                 "kind": kind,
-                                "has_en": False,
+                                "has_en": False, # We keep 'has_en' for frontend compatibility but it means 'has_source'
                                 "has_nl": False,
                                 "has_bak": False,
                                 "en_file": None,
@@ -95,22 +98,24 @@ def list_media():
                             }
                             media.append(existing)
                         
-                        is_nl = any(x in file_lower for x in [".nl.", ".dut."])
-                        # English is only detected if specifically tagged, 
-                        # OR if it has a generic .hi. / .sdh. tags AND NO Dutch tag is present.
-                        is_eng = any(x in file_lower for x in [".en.", ".eng."]) or \
-                                 (not is_nl and any(x in file_lower for x in [".hi.srt", ".sdh.srt"]))
-                        
-                        if is_eng:
-                            existing["has_en"] = True
-                            existing["en_file"] = os.path.join(root, file)
-                            bak_path = os.path.join(root, file) + ".bak"
-                            if os.path.exists(bak_path):
-                                existing["has_bak"] = True
-                                existing["bak_file"] = bak_path
                         if is_nl:
                             existing["has_nl"] = True
                             existing["nl_file"] = os.path.join(root, file)
+                        else:
+                            # Any non-Dutch SRT is a potential source
+                            # If we already have a source, we might want to prioritize .en. or similar, 
+                            # but for now let's just take the first one or prioritize if it has a tag
+                            is_tagged = re.search(r'\.[a-z]{2,3}\.srt$', file_lower)
+                            if not existing["has_en"] or is_tagged:
+                                existing["has_en"] = True
+                                existing["en_file"] = os.path.join(root, file)
+                        
+                        # Check for backups
+                        bak_path = os.path.join(root, file) + ".bak"
+                        if os.path.exists(bak_path):
+                            existing["has_bak"] = True
+                            existing["bak_file"] = bak_path
+                            
     return {"media": media}
 
 @app.post("/api/translate")
@@ -251,36 +256,84 @@ async def restore_backup(request: Request):
         return {"status": "restored"}
     return JSONResponse(status_code=404, content={"error": "Backup file not found"})
 
-def detect_is_wrong_language(file_path: str, target_lang: str) -> bool:
-    """Heuristic logic to detect if a file is likely still in English."""
+@app.get("/api/audit/untagged")
+async def audit_untagged():
+    settings = get_settings()
+    films_path = settings.get("films_path", "/Films")
+    series_path = settings.get("series_path", "/Series")
+    
+    results = []
+    for path in [films_path, series_path]:
+        if os.path.exists(path):
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    if file.lower().endswith(".srt"):
+                        # Check if it has a language tag (e.g. .en.srt, .nl.srt)
+                        # We consider it untagged if there's no tag or only generic tags like .hi. or .sdh.
+                        if not re.search(r'\.[a-z]{2,3}(\.[a-z]{2,8})?\.srt$', file, flags=re.IGNORECASE):
+                            full_path = os.path.join(root, file)
+                            results.append({
+                                "name": file,
+                                "path": full_path,
+                                "rel_path": os.path.relpath(full_path, start=path)
+                            })
+    return {"files": results}
+
+@app.post("/api/audit/identify")
+async def audit_identify(request: Request):
+    import google.generativeai as genai
+    data = await request.json()
+    file_path = data.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        return JSONResponse(status_code=404, content={"error": "File not found"})
+        
+    settings = get_settings()
+    api_key = settings.get("gemini_api_key")
+    if not api_key:
+        return JSONResponse(status_code=400, content={"error": "API Key missing"})
+        
     try:
-        # We only need a sample
         with open(file_path, "rb") as f:
-            bytes_data = f.read(10000) # first 10KB
+            bytes_data = f.read(5000)
         encoding = detect_encoding(bytes_data) or 'utf-8'
-        text = bytes_data.decode(encoding, errors='ignore').lower()
+        sample_text = bytes_data.decode(encoding, errors='ignore')
         
-        # Heuristic word lists
-        en_words = {' the ', ' and ', ' was ', ' that ', ' with ', ' you ', ' for ', ' have ', ' is ', ' it ', ' what ', ' are '}
-        lang_maps = {
-            "dutch": {' de ', ' het ', ' een ', ' en ', ' van ', ' ik ', ' is ', ' dat ', ' op ', ' te ', ' met ', ' om '},
-            "french": {' le ', ' la ', ' les ', ' et ', ' un ', ' une ', ' est ', ' dans ', ' que '},
-            "german": {' der ', ' die ', ' das ', ' und ', ' ein ', ' eine ', ' ist ', ' met ', ' nicht '},
-            "spanish": {' el ', ' la ', ' los ', ' y ', ' en ', ' un ', ' una ', ' que ', ' con '}
-        }
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(settings.get("ai_model", "gemini-1.5-flash"))
         
-        target_words = lang_maps.get(target_lang.lower(), set())
-        if not target_words: return False # Can't detect
+        prompt = (
+            "Identify the language of the following subtitle text. "
+            "Return ONLY the ISO 639-1 language code (e.g. 'en', 'nl', 'fr', 'de', 'es').\n\n"
+            f"[TEXT]\n{sample_text[:1000]}"
+        )
+        res = model.generate_content(prompt)
+        lang_code = res.text.strip().lower()
+        # Basic validation: should be 2 characters
+        if len(lang_code) > 2:
+            # Try to find a 2-char code in the response
+            match = re.search(r'\b([a-z]{2})\b', lang_code)
+            if match: lang_code = match.group(1)
+            else: lang_code = "unknown"
+            
+        return {"language": lang_code}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/audit/rename")
+async def audit_rename(request: Request):
+    data = await request.json()
+    file_path = data.get("file_path")
+    lang_code = data.get("language")
+    
+    if not file_path or not lang_code or not os.path.exists(file_path):
+        return JSONResponse(status_code=400, content={"error": "Invalid request"})
         
-        en_score = sum(1 for w in en_words if w in text)
-        target_score = sum(1 for w in target_words if w in text)
-        
-        # If English function words are significantly more frequent than target language, it's suspicious
-        if en_score > target_score and en_score > 3:
-            return True
-        return False
-    except:
-        return False
+    new_path = file_path.replace(".srt", f".{lang_code}.srt")
+    try:
+        os.rename(file_path, new_path)
+        return {"status": "success", "new_path": new_path}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/api/audit/list")
 async def audit_list():

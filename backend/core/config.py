@@ -1,7 +1,7 @@
 import os
 import json
 
-CONFIG_DIR = os.environ.get("CONFIG_PATH", "/SSD-DATA/mediastack/config/translator")
+CONFIG_DIR = os.environ.get("CONFIG_PATH", "/app/config")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULT_SETTINGS = {
