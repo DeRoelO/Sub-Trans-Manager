@@ -58,9 +58,19 @@ def update_settings(new_settings: dict):
     try:
         with open(CONFIG_FILE, "w") as f:
             json.dump(current_settings, f, indent=4)
+        print(f"✅ Configuration successfully saved to {CONFIG_FILE}")
         return current_settings
     except OSError as e:
+        print(f"❌ CONFIG ERROR: Failed to write to {CONFIG_FILE}: {e}")
         return {"error": str(e)}
+
+# Startup Check
+print(f"📂 Config Directory: {CONFIG_DIR}")
+print(f"📄 Config File: {CONFIG_FILE}")
+if os.path.exists(CONFIG_DIR):
+    print(f"🔓 Write Access: {os.access(CONFIG_DIR, os.W_OK)}")
+else:
+    print(f"🚨 Config directory does not exist yet.")
 
 # Load API key immediately to environment if present
 settings = get_settings()

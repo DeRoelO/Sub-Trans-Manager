@@ -40,7 +40,10 @@ def read_config():
 
 @app.post("/api/config")
 def write_config(settings: dict):
-    return update_settings(settings)
+    res = update_settings(settings)
+    if "error" in res:
+        return JSONResponse(status_code=500, content=res)
+    return res
 
 @app.get("/api/languages")
 def list_languages():
@@ -217,6 +220,9 @@ async def test_model(request: Request):
                 result_msg += f" Warning: Model '{ai_model}' failed (might not be available): {str(ge)}"
         
         return {"result": result_msg, "models": available}
+    except OSError as e:
+        print(f"❌ CONFIG ERROR: Failed to write to {CONFIG_FILE}: {e}")
+        return {"error": f"Permission denied or disk full: {e}"}
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"Connection failed: {str(e)}"})
 
