@@ -15,6 +15,11 @@ def truncate_logs():
     if len(_BATCH_LOGS) > 1000:
         _BATCH_LOGS = _BATCH_LOGS[-1000:]
 
+def clear_logs():
+    global _BATCH_LOGS
+    _BATCH_LOGS = []
+    append_log("🗑️ Logs cleared.")
+
 def append_log(message: str):
     global _BATCH_LOGS
     ts = datetime.now().strftime("%H:%M:%S")
@@ -108,3 +113,65 @@ async def get_log_generator(request):
         elif _BATCH_IS_RUNNING:
             yield {"data": ""} 
         await asyncio.sleep(1)
+
+async def bulk_rename_untagged_task(log_callback=None):
+    from core.config import get_settings
+    from core.utils import detect_encoding
+    import google.generativeai as genai
+    import os
+    import re
+
+    settings = get_settings()
+    api_key = settings.get('gemini_api_key')
+    if not api_key:
+        if log_callback: log_callback('? Error: API Key missing for bulk renaming.')
+        return
+
+    # 1. Find untagged files
+    films_path = settings.get('films_path', '/Films')
+    series_path = settings.get('series_path', '/Series')
+    untagged = []
+    for path in [films_path, series_path]:
+        if os.path.exists(path):
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    if file.lower().endswith('.srt') and not re.search(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', file, flags=re.IGNORECASE):
+                        untagged.append(os.path.join(root, file))
+
+    if not untagged:
+        if log_callback: log_callback('? No untagged files found.')
+        return
+
+    if log_callback: log_callback(f'?? Starting bulk rename of {len(untagged)} untagged files...')
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(settings.get('ai_model', 'gemini-1.5-flash'))
+
+    success_count = 0
+    for i, file_path in enumerate(untagged):
+        try:
+            # Identify
+            with open(file_path, 'rb') as f: bytes_data = f.read(5000)
+            encoding = detect_encoding(bytes_data) or 'utf-8'
+            sample_text = bytes_data.decode(encoding, errors='ignore')
+            
+            prompt = 'Identify the language of this subtitle text. Return ONLY the ISO 639-1 code (e.g. en, nl).\n\n' + sample_text[:1000]
+            res = model.generate_content(prompt)
+            lang_code = res.text.strip().lower()
+            match = re.search(r'\b([a-z]{2})\b', lang_code)
+            lang_code = match.group(1) if match else None
+
+            if lang_code:
+                new_path = file_path.replace('.srt', f'.{lang_code}.srt')
+                os.rename(file_path, new_path)
+                success_count += 1
+                if log_callback: log_callback(f'[{i+1}/{len(untagged)}] Renamed: {os.path.basename(file_path)} -> .{lang_code}.srt')
+            else:
+                if log_callback: log_callback(f'[{i+1}/{len(untagged)}] ?? Could not identify: {os.path.basename(file_path)}')
+            
+            # Small delay to respect API limits
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            if log_callback: log_callback(f'? Error identifying {os.path.basename(file_path)}: {e}')
+
+    if log_callback: log_callback(f'?? Bulk rename complete. {success_count} files renamed.')

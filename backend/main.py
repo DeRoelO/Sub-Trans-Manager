@@ -46,6 +46,12 @@ def write_config(settings: dict):
 def list_languages():
     return {"languages": SUPPORTED_LANGUAGES}
 
+@app.post("/api/logs/clear")
+def api_clear_logs():
+    from core.batch import clear_logs
+    clear_logs()
+    return {"status": "cleared"}
+
 @app.get("/api/media")
 def list_media():
     settings = get_settings()
@@ -290,6 +296,12 @@ async def audit_rename(request: Request):
         os.rename(file_path, new_path)
         return {"status": "success", "new_path": new_path}
     except Exception as e: return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/audit/rename_all")
+async def audit_rename_all(background_tasks: BackgroundTasks):
+    from core.batch import bulk_rename_untagged_task, append_log
+    background_tasks.add_task(bulk_rename_untagged_task, log_callback=append_log)
+    return {"status": "started"}
 
 @app.get("/api/audit/list")
 async def audit_list():

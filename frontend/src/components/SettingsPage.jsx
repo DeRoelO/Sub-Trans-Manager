@@ -467,9 +467,21 @@ export default function SettingsPage() {
             </div>
 
             <div className="glass-panel" style={{ padding: '2rem', flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <div className="flex items-center gap-2 mb-4">
-                <Info size={20} className="text-muted" />
-                <h3>Recent Activity Logs</h3>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Info size={20} className="text-muted" />
+                  <h3>Recent Activity Logs</h3>
+                </div>
+                <button 
+                  className="btn-small secondary" 
+                  onClick={async () => {
+                    await fetch(`${API_BASE}/logs/clear`, { method: 'POST' });
+                    setLogs([]);
+                  }}
+                  style={{ padding: '4px 10px', fontSize: '11px' }}
+                >
+                  Clear Logs
+                </button>
               </div>
               <div className="terminal" style={{ flex: 1, height: '440px' }}>
                 {logs.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>Waiting for activity...</span> : null}
@@ -512,7 +524,16 @@ export default function SettingsPage() {
                     <button onClick={runAuditScan}>⚡ Scan for Errors</button>
                   </>
                 ) : (
-                  <button onClick={runUntaggedScan}>⚡ Scan Untagged</button>
+                  <div className="flex gap-2">
+                    <button onClick={async () => {
+                      if (!window.confirm("This will identify and rename ALL untagged files in the background. Continue?")) return;
+                      await fetch(`${API_BASE}/audit/rename_all`, { method: 'POST' });
+                      alert("Bulk rename started. Check the logs in the General tab for progress.");
+                    }} className="secondary">
+                      🚀 Identify & Rename All
+                    </button>
+                    <button onClick={runUntaggedScan}>⚡ Scan Untagged</button>
+                  </div>
                 )}
               </div>
             </div>
