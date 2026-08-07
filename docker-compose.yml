@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  sub-trans-manager:
+    image: ghcr.io/deroelo/sub-trans-manager:latest
+    container_name: sub-trans-manager
+    ports:
+      - "8000:8000"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - /path/to/your/films:/Films
+      - /path/to/your/series:/Series
+      - ./config:/app/config
+    restart: unless-stopped
