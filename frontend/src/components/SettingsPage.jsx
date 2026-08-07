@@ -20,6 +20,8 @@ export default function SettingsPage() {
   const [isIdentifying, setIsIdentifying] = useState(false)
   const [activeTab, setActiveTab] = useState('general') // 'general' or 'audit'
   const [auditSubTab, setAuditSubTab] = useState('suspicious') // 'suspicious' or 'untagged'
+  const [previewData, setPreviewData] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
   
   const logEndRef = useRef(null)
 
@@ -227,6 +229,26 @@ export default function SettingsPage() {
     setConfig(prev => ({ ...prev, [field]: value }))
   }
 
+  const handleTargetTypeToggle = (type) => {
+    const current = config.batch_target_types || ['films', 'series']
+    const updated = current.includes(type)
+      ? current.filter(t => t !== type)
+      : [...current, type]
+    setConfig(prev => ({ ...prev, batch_target_types: updated }))
+  }
+
+  const fetchBatchPreview = async () => {
+    setPreviewLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/batch/preview`)
+      const data = await res.json()
+      setPreviewData(data)
+    } catch (err) {
+      alert("Failed to fetch batch preview")
+    }
+    setPreviewLoading(false)
+  }
+
   const saveConfig = async (e) => {
     e.preventDefault()
     try {
@@ -236,7 +258,8 @@ export default function SettingsPage() {
         body: JSON.stringify({
           ...config,
           batch_limit: parseInt(config.batch_limit) || 60,
-          batch_delay: parseInt(config.batch_delay) || 60
+          batch_delay: parseInt(config.batch_delay) || 5,
+          chunk_size: parseInt(config.chunk_size) || 10000
         })
       })
       if (!resp.ok) {
@@ -403,10 +426,32 @@ export default function SettingsPage() {
 
               <div className="flex items-center gap-2 mb-4">
                 <Activity size={20} className="text-muted" />
-                <h3>Paths & Scheduler</h3>
+                <h3>Batch Scope & Target Media</h3>
               </div>
 
-              <div className="form-group">
+              <div className="form-group mb-4">
+                <label>Media Libraries to Process:</label>
+                <div className="flex gap-4 mt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={(config.batch_target_types || ['films', 'series']).includes('films')} 
+                      onChange={() => handleTargetTypeToggle('films')}
+                    />
+                    <span>🍿 Movies (/Films)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={(config.batch_target_types || ['films', 'series']).includes('series')} 
+                      onChange={() => handleTargetTypeToggle('series')}
+                    />
+                    <span>📺 TV Series (/Series)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="form-group mb-4">
                 <label>Daily Auto-Start Time:</label>
                 <input 
                   type="time" 
@@ -416,13 +461,14 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex-col gap-2 mb-6">
+                <label style={{ fontWeight: '600', marginBottom: '4px' }}>Batch Steps to Execute:</label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input 
                     type="checkbox" 
                     checked={config.auto_identify_untagged} 
                     onChange={(e) => handleConfigChange('auto_identify_untagged', e.target.checked)}
                   />
-                  <span>Auto-identify language for untagged files (.srt)</span>
+                  <span>Step 1: Auto-identify language for untagged files (.srt)</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input 
@@ -430,13 +476,21 @@ export default function SettingsPage() {
                     checked={config.auto_cleanup_suspicious} 
                     onChange={(e) => handleConfigChange('auto_cleanup_suspicious', e.target.checked)}
                   />
-                  <span>Auto-delete suspicious translations (experimental)</span>
+                  <span>Step 2: Auto-delete suspicious translations (experimental)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={config.auto_translate_missing ?? true} 
+                    onChange={(e) => handleConfigChange('auto_translate_missing', e.target.checked)}
+                  />
+                  <span>Step 3: Auto-translate missing subtitles</span>
                 </label>
               </div>
 
-              <div className="media-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+              <div className="media-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
                 <div className="form-group">
-                   <label>Batch Limit</label>
+                   <label>Max Files / Batch</label>
                    <input 
                      type="number" 
                      value={config.batch_limit || 60} 
@@ -447,13 +501,21 @@ export default function SettingsPage() {
                    <label>Delay (sec)</label>
                    <input 
                      type="number" 
-                     value={config.batch_delay || 60} 
+                     value={config.batch_delay ?? 5} 
                      onChange={(e) => handleConfigChange('batch_delay', e.target.value)}
+                   />
+                </div>
+                <div className="form-group">
+                   <label>Chunk Size (chars)</label>
+                   <input 
+                     type="number" 
+                     value={config.chunk_size || 10000} 
+                     onChange={(e) => handleConfigChange('chunk_size', e.target.value)}
                    />
                 </div>
               </div>
 
-              <div className="form-group">
+              <div className="form-group mt-4">
                 <label>Jellyfin Webhook (Optional)</label>
                 <input 
                   type="text" 
@@ -474,15 +536,53 @@ export default function SettingsPage() {
                   <Play size={20} className="text-muted" />
                   <h3>Batch Job Control</h3>
                 </div>
-                {batchRunning ? (
-                  <button className="danger" onClick={toggleBatch}><Square size={16} /> Stop Job</button>
-                ) : (
-                  <button onClick={toggleBatch}><Play size={16} /> Start Now</button>
-                )}
+                <div className="flex gap-2">
+                  <button className="secondary btn-small" onClick={fetchBatchPreview} disabled={previewLoading}>
+                    {previewLoading ? 'Scanning...' : '🔍 Inspect Queue'}
+                  </button>
+                  {batchRunning ? (
+                    <button className="danger" onClick={toggleBatch}><Square size={16} /> Stop Job</button>
+                  ) : (
+                    <button onClick={toggleBatch}><Play size={16} /> Start Now</button>
+                  )}
+                </div>
               </div>
               <p className="text-muted" style={{ fontSize: '14px' }}>
-                Manually start or stop the library scan and translation process.
+                Manually start or stop the library scan and translation process. Click <strong>Inspect Queue</strong> to see what files will be translated.
               </p>
+
+              {previewData && (
+                <div style={{ marginTop: '1.2rem', padding: '1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', border: '1px solid var(--card-border)' }}>
+                  <h4 style={{ marginBottom: '0.5rem', fontSize: '14px' }}>📋 Next Batch Preview</h4>
+                  <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div><strong>Libraries:</strong> {(previewData.scope?.target_types || []).join(', ').toUpperCase()}</div>
+                    <div><strong>Untagged Files:</strong> {previewData.untagged_count}</div>
+                    <div><strong>Missing Translations:</strong> {previewData.total_to_translate} (Max {previewData.scope?.limit} queued)</div>
+                  </div>
+                  {previewData.to_translate_preview && previewData.to_translate_preview.length > 0 ? (
+                    <div style={{ marginTop: '0.8rem', maxHeight: '180px', overflowY: 'auto' }}>
+                      <table className="w-full" style={{ fontSize: '11px', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', textAlign: 'left' }}>
+                            <th style={{ padding: '4px' }}>File</th>
+                            <th style={{ padding: '4px' }}>Folder</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {previewData.to_translate_preview.map((item, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                              <td style={{ padding: '4px', fontWeight: '500' }}>{item.name}</td>
+                              <td style={{ padding: '4px', color: 'var(--text-muted)' }}>{item.rel_path}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '0.5rem' }}>No files currently queued for translation.</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="glass-panel" style={{ padding: '2rem', flex: 1, display: 'flex', flexDirection: 'column' }}>

@@ -34,27 +34,85 @@ def stop_batch_job():
         _BATCH_IS_RUNNING = False
         append_log("🔴 STOP signal sent. Terminating after current item.")
 
-async def identify_untagged_files(log_callback=None):
-    """Heuristic identification (FREE - No API calls)."""
+def get_batch_preview():
+    """Generates a preview of what will be processed in the next batch run."""
     settings = get_settings()
-    films_path = settings.get('films_path', '/Films')
-    series_path = settings.get('series_path', '/Series')
+    target_types = settings.get("batch_target_types", ["films", "series"])
     
-    untagged = []
-    for path in [films_path, series_path]:
-        if os.path.exists(path):
-            for root, dirs, files in os.walk(path):
-                for file in files:
-                    if file.lower().endswith('.srt') and not re.search(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', file, flags=re.IGNORECASE):
-                        untagged.append(os.path.join(root, file))
+    media_paths = []
+    if "films" in target_types and settings.get("films_path") and os.path.exists(settings.get("films_path")):
+        media_paths.append(("Films", settings.get("films_path")))
+    if "series" in target_types and settings.get("series_path") and os.path.exists(settings.get("series_path")):
+        media_paths.append(("Series", settings.get("series_path")))
 
-    if not untagged: return
+    target_tag = settings.get("target_language_tag", "nl")
+    variants = settings.get("target_language_variants", ["nl", "dut"])
 
-    if log_callback: log_callback(f"🔍 Analyzing {len(untagged)} untagged files using heuristics...")
+    untagged_files = []
+    to_translate = []
+    target_files = []
+
+    for kind, base_path in media_paths:
+        for root, dirs, files in os.walk(base_path):
+            for file in files:
+                if not file.lower().endswith(".srt"):
+                    continue
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, start=base_path)
+
+                # Check if untagged (.srt without language extension)
+                if not re.search(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', file, flags=re.IGNORECASE):
+                    untagged_files.append({"name": file, "path": full_path, "rel_path": rel_path, "kind": kind})
+                    continue
+
+                # Check if it's already in the target language
+                if is_target_language_file(file):
+                    target_files.append({"name": file, "path": full_path, "rel_path": rel_path, "kind": kind})
+                    continue
+
+                # Check if target translation exists
+                target_path = re.sub(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', f'.{target_tag}.srt', full_path, flags=re.IGNORECASE)
+                if target_path == full_path:
+                    target_path = full_path.replace(".srt", f".{target_tag}.srt")
+
+                if not os.path.exists(target_path):
+                    to_translate.append({
+                        "name": file,
+                        "path": full_path,
+                        "target_path": target_path,
+                        "rel_path": rel_path,
+                        "kind": kind
+                    })
+
+    limit = settings.get("batch_limit", 60)
+
+    return {
+        "is_running": _BATCH_IS_RUNNING,
+        "scope": {
+            "target_types": target_types,
+            "paths": [p[1] for p in media_paths],
+            "limit": limit,
+            "delay": settings.get("batch_delay", 5),
+            "auto_identify": settings.get("auto_identify_untagged", True),
+            "auto_cleanup": settings.get("auto_cleanup_suspicious", False),
+            "auto_translate": settings.get("auto_translate_missing", True),
+        },
+        "untagged_count": len(untagged_files),
+        "target_file_count": len(target_files),
+        "total_to_translate": len(to_translate),
+        "to_translate_preview": to_translate[:limit]
+    }
+
+async def identify_untagged_files_list(untagged_files: list, log_callback=None):
+    """Heuristic identification (FREE - No API calls)."""
+    if not untagged_files: return 0
+
+    if log_callback: log_callback(f"🔍 Analyzing {len(untagged_files)} untagged files using heuristics...")
 
     success_count = 0
-    for file_path in untagged:
+    for item in untagged_files:
         if not _BATCH_IS_RUNNING: break
+        file_path = item["path"]
         try:
             with open(file_path, 'rb') as f: bytes_data = f.read(15000)
             encoding = detect_encoding(bytes_data) or 'utf-8'
@@ -66,33 +124,31 @@ async def identify_untagged_files(log_callback=None):
                 os.rename(file_path, new_path)
                 success_count += 1
                 if log_callback: log_callback(f"🏷️ Identified: {os.path.basename(file_path)} -> .{lang_code}.srt")
-        except: pass
+        except Exception as e:
+            pass
 
     if success_count > 0 and log_callback:
-        log_callback(f"✅ Successfully identified {success_count} files.")
+        log_callback(f"✅ Successfully identified {success_count} untagged files.")
+    return success_count
 
-async def cleanup_suspicious_files(log_callback=None):
+async def cleanup_suspicious_files_list(target_files: list, log_callback=None):
     settings = get_settings()
-    films_path = settings.get('films_path', '/Films')
-    series_path = settings.get('series_path', '/Series')
     target_lang = settings.get('target_language', 'Dutch')
-    variants = settings.get('target_language_variants', ['nl', 'dut'])
     
     count = 0
-    for path in [films_path, series_path]:
-        if os.path.exists(path):
-            for root, dirs, files in os.walk(path):
-                for file in files:
-                    if not _BATCH_IS_RUNNING: break
-                    file_lower = file.lower()
-                    if any(f".{v}." in file_lower or file_lower.endswith(f".{v}.srt") for v in variants):
-                        full_path = os.path.join(root, file)
-                        if detect_is_wrong_language(full_path, target_lang):
-                            os.remove(full_path)
-                            count += 1
-                            if log_callback: log_callback(f"🗑️ Deleted suspicious translation: {file}")
+    for item in target_files:
+        if not _BATCH_IS_RUNNING: break
+        full_path = item["path"]
+        if detect_is_wrong_language(full_path, target_lang):
+            try:
+                os.remove(full_path)
+                count += 1
+                if log_callback: log_callback(f"🗑️ Deleted suspicious translation: {item['name']}")
+            except: pass
+            
     if count > 0 and log_callback:
         log_callback(f"🧹 Cleaned up {count} suspicious translations.")
+    return count
 
 async def start_batch_job():
     global _BATCH_IS_RUNNING
@@ -104,55 +160,86 @@ async def start_batch_job():
     append_log("🟢 Starting automated batch job...")
     
     settings = get_settings()
-    media_paths = [settings.get("films_path", "/Films"), settings.get("series_path", "/Series")]
     limit = settings.get("batch_limit", 60)
-    delay = settings.get("batch_delay", 60)
-    target_tag = settings.get("target_language_tag", "nl")
+    delay = settings.get("batch_delay", 5)
     
+    do_identify = settings.get("auto_identify_untagged", True)
+    do_cleanup = settings.get("auto_cleanup_suspicious", False)
+    do_translate = settings.get("auto_translate_missing", True)
+
     try:
+        # Step 0: Single Pass Discovery
+        append_log("🔍 [Batch] Scanning media directories...")
+        preview = get_batch_preview()
+        
+        target_types = preview["scope"]["target_types"]
+        append_log(f"📋 Scope: {', '.join(target_types).upper()} | Limit: {limit} | Delay: {delay}s")
+        append_log(f"📊 Scan Results: {preview['untagged_count']} untagged, {preview['total_to_translate']} missing translations.")
+
         # Step 1: Identify Untagged (Heuristic - Free)
-        if settings.get("auto_identify_untagged", True):
-            await identify_untagged_files(log_callback=append_log)
+        if do_identify and preview["untagged_count"] > 0:
+            append_log("📌 [Step 1/3] Identifying untagged files...")
+            # Collect full untagged list
+            untagged_list = []
+            for path in preview["scope"]["paths"]:
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        if file.lower().endswith('.srt') and not re.search(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', file, flags=re.IGNORECASE):
+                            untagged_list.append({"path": os.path.join(root, file)})
+            await identify_untagged_files_list(untagged_list, log_callback=append_log)
+        else:
+            append_log("⏭️ [Step 1/3] Identify untagged skipped (Disabled or no untagged files).")
 
         # Step 2: Cleanup Suspicious (Heuristic - Free)
-        if settings.get("auto_cleanup_suspicious", False):
-            await cleanup_suspicious_files(log_callback=append_log)
+        if do_cleanup:
+            append_log("📌 [Step 2/3] Checking for suspicious translations...")
+            target_list = []
+            variants = settings.get("target_language_variants", ["nl", "dut"])
+            for path in preview["scope"]["paths"]:
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        if any(f".{v}." in file.lower() or file.lower().endswith(f".{v}.srt") for v in variants):
+                            target_list.append({"name": file, "path": os.path.join(root, file)})
+            await cleanup_suspicious_files_list(target_list, log_callback=append_log)
+        else:
+            append_log("⏭️ [Step 2/3] Cleanup suspicious skipped (Disabled).")
 
         # Step 3: Translation Loop
-        from core.translator import translate_single_file
-        count = 0
-        for base_path in media_paths:
-            if not _BATCH_IS_RUNNING or count >= limit: break
-            if not os.path.exists(base_path): continue
-                
-            for root, dirs, files in os.walk(base_path):
-                if not _BATCH_IS_RUNNING or count >= limit: break
-                for file in files:
+        if do_translate:
+            append_log("📌 [Step 3/3] Translating missing subtitles...")
+            from core.translator import translate_single_file
+            
+            queue = preview["to_translate_preview"]
+            if not queue:
+                append_log("🎉 No missing translations found! All media files are up-to-date.")
+            else:
+                append_log(f"🚀 Queued {len(queue)} items for translation.")
+                count = 0
+                for item in queue:
                     if not _BATCH_IS_RUNNING or count >= limit: break
-                    if file.lower().endswith(".srt"):
-                        if is_target_language_file(file): continue
-                        
-                        source_path = os.path.join(root, file)
-                        target_path = re.sub(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', f'.{target_tag}.srt', source_path, flags=re.IGNORECASE)
-                        if target_path == source_path:
-                            target_path = source_path.replace(".srt", f".{target_tag}.srt")
-                        
-                        if not os.path.exists(target_path):
-                            append_log(f"🚀 Processing: {file}")
-                            success = translate_single_file(source_path, log_callback=append_log)
-                            if success:
-                                count += 1
-                                if count < limit and _BATCH_IS_RUNNING:
-                                    for _ in range(delay):
-                                        if not _BATCH_IS_RUNNING: break
-                                        await asyncio.sleep(1)
-                            else:
-                                append_log(f"❌ Failed to process {file}")
+                    source_path = item["path"]
+                    append_log(f"🚀 Processing [{count + 1}/{len(queue)}]: {item['name']} ({item['kind']})")
+                    
+                    # Run sync translation in a separate thread to keep asyncio event loop responsive!
+                    success = await asyncio.to_thread(translate_single_file, source_path, log_callback=append_log)
+                    if success:
+                        count += 1
+                        if count < limit and _BATCH_IS_RUNNING and delay > 0:
+                            append_log(f"⏳ Waiting {delay}s before next item...")
+                            for _ in range(delay):
+                                if not _BATCH_IS_RUNNING: break
+                                await asyncio.sleep(1)
+                    else:
+                        append_log(f"❌ Failed to process {item['name']}")
+                append_log(f"🏁 Translation completed. Translated {count} items.")
+        else:
+            append_log("⏭️ [Step 3/3] Auto-translate missing skipped (Disabled in settings).")
+
     except Exception as e:
         append_log(f"🔥 Error during batch processing: {e}")
     finally:
         _BATCH_IS_RUNNING = False
-        append_log(f"🏁 Batch run complete. Translated {count} items.")
+        append_log("🏁 Batch run finished.")
 
 def get_batch_status():
     return {"is_running": _BATCH_IS_RUNNING}
@@ -175,6 +262,13 @@ async def bulk_rename_untagged_task(log_callback=None):
     if _BATCH_IS_RUNNING: return
     _BATCH_IS_RUNNING = True
     try:
-        await identify_untagged_files(log_callback=log_callback)
+        preview = get_batch_preview()
+        untagged_list = []
+        for path in preview["scope"]["paths"]:
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    if file.lower().endswith('.srt') and not re.search(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', file, flags=re.IGNORECASE):
+                        untagged_list.append({"path": os.path.join(root, file)})
+        await identify_untagged_files_list(untagged_list, log_callback=log_callback)
     finally:
         _BATCH_IS_RUNNING = False

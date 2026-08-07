@@ -113,15 +113,16 @@ def translate_single_file(input_file: str, log_callback=None):
     
     parsed = parse_srt(content)
     all_results = []
-    chunks = chunk_text(parsed, chunk_size=2000) # 5x smaller chunks
+    chunk_size = settings.get("chunk_size", 10000)
+    chunks = chunk_text(parsed, chunk_size=chunk_size)
     total_chunks = len(chunks)
     
     for idx, chunk in enumerate(chunks):
         # Check Success Rate (only after we have at least 10 calls to avoid early spikes)
         rate = get_success_rate()
         if len(_CALL_HISTORY) >= 10 and rate < 0.90:
-            if log_callback: log_callback(f"⛔ Success rate dropped to {rate:.1%}. Pausing for 1 hour...")
-            time.sleep(3600)
+            if log_callback: log_callback(f"⛔ Success rate dropped to {rate:.1%}. Pausing for 30s before retry...")
+            time.sleep(30)
             _CALL_HISTORY.clear()
 
         res = translate_chunk(model, [item['text'] for item in chunk], target_language)

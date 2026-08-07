@@ -34,12 +34,15 @@ DEFAULT_SETTINGS = {
     "target_language_variants": ["nl", "dut", "dutch", "nld", "ned"],
     "films_path": "/Films",
     "series_path": "/Series",
+    "batch_target_types": ["films", "series"],
     "batch_limit": 60,
-    "batch_delay": 60,
+    "batch_delay": 5,
+    "chunk_size": 10000,
     "cron_time": "02:00",
     "jellyfin_webhook": "",
     "auto_cleanup_suspicious": False,
-    "auto_identify_untagged": True
+    "auto_identify_untagged": True,
+    "auto_translate_missing": True
 }
 
 SUPPORTED_LANGUAGES = [

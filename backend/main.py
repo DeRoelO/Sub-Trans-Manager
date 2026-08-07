@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from core.translator import translate_single_file, parse_srt, detect_encoding
-from core.batch import start_batch_job, stop_batch_job, get_batch_status, get_log_generator
+from core.batch import start_batch_job, stop_batch_job, get_batch_status, get_log_generator, get_batch_preview
 from core.config import get_settings, update_settings, SUPPORTED_LANGUAGES
 from core.utils import is_target_language_file, detect_is_wrong_language
 
@@ -163,6 +163,10 @@ async def save_srt(request: Request):
 @app.get("/api/batch")
 def get_batch():
     return get_batch_status()
+
+@app.get("/api/batch/preview")
+def preview_batch():
+    return get_batch_preview()
 
 @app.post("/api/batch/start")
 async def api_start_batch(background_tasks: BackgroundTasks):

@@ -27,8 +27,8 @@ def configure_scheduler():
         # Parse HH:MM
         hours, minutes = cron_time.split(":")
         trigger = CronTrigger(hour=int(hours), minute=int(minutes))
-        scheduler.add_job(job_wrapper, trigger=trigger, id="batch_translation")
+        scheduler.add_job(start_batch_job, trigger=trigger, id="batch_translation")
         print(f"Scheduler configured for everyday at: {cron_time}")
     except Exception as e:
         print(f"Error configuring scheduler (Invalid time format {cron_time}): {e}, falling back to default 2 AM")
-        scheduler.add_job(job_wrapper, trigger=CronTrigger(hour=2, minute=0), id="batch_translation")
+        scheduler.add_job(start_batch_job, trigger=CronTrigger(hour=2, minute=0), id="batch_translation")
