@@ -55,6 +55,8 @@ def api_clear_logs():
     clear_logs()
     return {"status": "cleared"}
 
+VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.avi', '.m4v', '.ts', '.webm')
+
 @app.get("/api/media")
 def list_media():
     settings = get_settings()
@@ -66,19 +68,24 @@ def list_media():
     
     for path, kind in [(films_path, "film"), (series_path, "series")]:
         if os.path.exists(path):
-            for root, dirs, files in os.walk(path):
-                for file in files:
-                    file_lower = file.lower()
-                    if file_lower.endswith(".srt"):
-                        # Step 1: Detect if it's the target language
-                        is_target = is_target_language_file(file)
+            try:
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        file_lower = file.lower()
+                        is_srt = file_lower.endswith(".srt")
+                        is_video = file_lower.endswith(VIDEO_EXTENSIONS)
                         
-                        # Step 2: Try to extract a base name
-                        base_name_match = re.sub(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', '', file, flags=re.IGNORECASE)
-                        if base_name_match == file:
-                            base_name_match = file.replace(".srt", "")
+                        if not is_srt and not is_video:
+                            continue
+
+                        if is_srt:
+                            base_name = re.sub(r'\.[a-z]{2,5}(\.[a-z]{2,8})?\.srt$', '', file, flags=re.IGNORECASE)
+                            if base_name == file:
+                                base_name = file.replace(".srt", "")
+                        else:
+                            base_name = os.path.splitext(file)[0]
                             
-                        full_base_path = os.path.join(root, base_name_match)
+                        full_base_path = os.path.join(root, base_name)
                         
                         existing = next((m for m in media if m["base_path"] == full_base_path), None)
                         if not existing:
@@ -90,7 +97,7 @@ def list_media():
 
                             existing = {
                                 "base_path": full_base_path,
-                                "name": base_name_match, 
+                                "name": base_name, 
                                 "group": display_dir, 
                                 "subpath": rel_path if rel_path != display_dir else "",
                                 "kind": kind,
@@ -104,19 +111,23 @@ def list_media():
                             }
                             media.append(existing)
                         
-                        if is_target:
-                            existing["has_target"] = True
-                            existing["target_file"] = os.path.join(root, file)
-                        else:
-                            is_tagged = re.search(r'\.[a-z]{2,3}\.srt$', file_lower)
-                            if not existing["has_source"] or is_tagged:
-                                existing["has_source"] = True
-                                existing["source_file"] = os.path.join(root, file)
-                        
-                        bak_path = os.path.join(root, file) + ".bak"
-                        if os.path.exists(bak_path):
-                            existing["has_bak"] = True
-                            existing["bak_file"] = bak_path
+                        if is_srt:
+                            is_target = is_target_language_file(file)
+                            if is_target:
+                                existing["has_target"] = True
+                                existing["target_file"] = os.path.join(root, file)
+                            else:
+                                is_tagged = re.search(r'\.[a-z]{2,3}\.srt$', file_lower)
+                                if not existing["has_source"] or is_tagged:
+                                    existing["has_source"] = True
+                                    existing["source_file"] = os.path.join(root, file)
+                            
+                            bak_path = os.path.join(root, file) + ".bak"
+                            if os.path.exists(bak_path):
+                                existing["has_bak"] = True
+                                existing["bak_file"] = bak_path
+            except Exception as e:
+                print(f"⚠️ Error scanning media path {path}: {e}")
                             
     return {"media": media}
 
